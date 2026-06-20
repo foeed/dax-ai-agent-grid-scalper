@@ -22,11 +22,14 @@ class RuntimeSettingsStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        return {
-            key: value
-            for key, value in raw.items()
-            if key in {"trading_mode", "dry_run", "use_llm", "llm_fail_closed"}
+        valid_keys = {
+            "trading_mode", "dry_run", "use_llm", "llm_fail_closed",
+            "lots", "max_positions", "max_spread_points", "max_spread_percent", "cooldown_seconds",
+            "magic_number", "deviation_points", "one_trade_per_bar",
+            "bars_to_send", "request_timeout_ms", "request_retries", "retry_delay_ms",
+            "settings_refresh_seconds",
         }
+        return {key: value for key, value in raw.items() if key in valid_keys}
 
     def effective(self) -> dict[str, Any]:
         overrides = self.get_overrides()
@@ -35,6 +38,19 @@ class RuntimeSettingsStore:
             "dry_run": overrides.get("dry_run", self.settings.dry_run),
             "use_llm": overrides.get("use_llm", self.settings.use_llm),
             "llm_fail_closed": overrides.get("llm_fail_closed", self.settings.llm_fail_closed),
+            "lots": overrides.get("lots", self.settings.fixed_lot if self.settings.fixed_lot else 0.01),
+            "max_positions": overrides.get("max_positions", self.settings.max_positions),
+            "max_spread_points": overrides.get("max_spread_points", self.settings.max_spread_points),
+            "max_spread_percent": overrides.get("max_spread_percent", 0.5),
+            "cooldown_seconds": overrides.get("cooldown_seconds", self.settings.cooldown_seconds),
+            "magic_number": overrides.get("magic_number", self.settings.magic_number),
+            "deviation_points": overrides.get("deviation_points", self.settings.deviation_points),
+            "one_trade_per_bar": overrides.get("one_trade_per_bar", True),
+            "bars_to_send": overrides.get("bars_to_send", self.settings.bars),
+            "request_timeout_ms": overrides.get("request_timeout_ms", 30000),
+            "request_retries": overrides.get("request_retries", 1),
+            "retry_delay_ms": overrides.get("retry_delay_ms", 750),
+            "settings_refresh_seconds": overrides.get("settings_refresh_seconds", 30),
         }
 
     def update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -57,6 +73,72 @@ class RuntimeSettingsStore:
 
         if "llm_fail_closed" in payload:
             current["llm_fail_closed"] = _coerce_bool(payload["llm_fail_closed"])
+
+        if "lots" in payload:
+            lots = float(payload["lots"])
+            if lots <= 0:
+                raise ValueError("lots must be positive")
+            current["lots"] = lots
+
+        if "max_positions" in payload:
+            val = int(payload["max_positions"])
+            if val < 1:
+                raise ValueError("max_positions must be >= 1")
+            current["max_positions"] = val
+
+        if "max_spread_points" in payload:
+            current["max_spread_points"] = int(payload["max_spread_points"])
+
+        if "max_spread_percent" in payload:
+            val = float(payload["max_spread_percent"])
+            if val < 0:
+                raise ValueError("max_spread_percent must be >= 0")
+            current["max_spread_percent"] = val
+
+        if "cooldown_seconds" in payload:
+            val = int(payload["cooldown_seconds"])
+            if val < 0:
+                raise ValueError("cooldown_seconds must be >= 0")
+            current["cooldown_seconds"] = val
+
+        if "magic_number" in payload:
+            current["magic_number"] = int(payload["magic_number"])
+
+        if "deviation_points" in payload:
+            current["deviation_points"] = int(payload["deviation_points"])
+
+        if "one_trade_per_bar" in payload:
+            current["one_trade_per_bar"] = _coerce_bool(payload["one_trade_per_bar"])
+
+        if "bars_to_send" in payload:
+            val = int(payload["bars_to_send"])
+            if val < 50:
+                raise ValueError("bars_to_send must be >= 50")
+            current["bars_to_send"] = val
+
+        if "request_timeout_ms" in payload:
+            val = int(payload["request_timeout_ms"])
+            if val < 1000:
+                raise ValueError("request_timeout_ms must be >= 1000")
+            current["request_timeout_ms"] = val
+
+        if "request_retries" in payload:
+            val = int(payload["request_retries"])
+            if val < 0:
+                raise ValueError("request_retries must be >= 0")
+            current["request_retries"] = val
+
+        if "retry_delay_ms" in payload:
+            val = int(payload["retry_delay_ms"])
+            if val < 0:
+                raise ValueError("retry_delay_ms must be >= 0")
+            current["retry_delay_ms"] = val
+
+        if "settings_refresh_seconds" in payload:
+            val = int(payload["settings_refresh_seconds"])
+            if val < 5:
+                raise ValueError("settings_refresh_seconds must be >= 5")
+            current["settings_refresh_seconds"] = val
 
         current["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.path.write_text(json.dumps(current, indent=2), encoding="utf-8")
@@ -158,12 +240,30 @@ class EventStore:
                 "dry_run": effective["dry_run"],
                 "symbol": self.settings.symbol,
                 "timeframe": self.settings.timeframe,
+                "bars": self.settings.bars,
+                "poll_seconds": self.settings.poll_seconds,
                 "use_llm": effective["use_llm"],
                 "llm_fail_closed": effective["llm_fail_closed"],
+                "llm_min_score": self.settings.llm_min_score,
+                "llm_timeout_seconds": self.settings.llm_timeout_seconds,
                 "max_spread_points": self.settings.max_spread_points,
                 "max_positions": self.settings.max_positions,
                 "max_trades_per_day": self.settings.max_trades_per_day,
                 "cooldown_seconds": self.settings.cooldown_seconds,
+                "risk_percent": self.settings.risk_percent,
+                "daily_loss_limit_percent": self.settings.daily_loss_limit_percent,
+                "min_signal_confidence": self.settings.min_signal_confidence,
+                "ema_fast": self.settings.ema_fast,
+                "ema_slow": self.settings.ema_slow,
+                "ema_trend": self.settings.ema_trend,
+                "atr_period": self.settings.atr_period,
+                "rsi_period": self.settings.rsi_period,
+                "sl_atr_multiplier": self.settings.sl_atr_multiplier,
+                "tp_atr_multiplier": self.settings.tp_atr_multiplier,
+                "min_stop_points": self.settings.min_stop_points,
+                "fixed_lot": self.settings.fixed_lot,
+                "order_comment": self.settings.order_comment,
+                "server_time": datetime.now(timezone.utc).isoformat(),
                 "event_log_path": str(self.settings.event_log_path),
                 "state_path": str(self.settings.state_path),
                 "dashboard_auto_token": self.settings.dashboard_auto_token,

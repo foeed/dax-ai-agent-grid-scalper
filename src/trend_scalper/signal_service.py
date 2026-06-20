@@ -206,6 +206,18 @@ class SignalHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if parsed.path == "/api/runtime-settings":
+            self._send(context.runtime_settings.effective() if context else {})
+            return
+        if parsed.path == "/api/symbol-info":
+            query = parse_qs(parsed.query)
+            symbol = query.get("symbol", ["XAUUSD"])[0].upper()
+            self._send({
+                "symbol": symbol,
+                "type": _detect_asset_class(symbol),
+                "presets": _asset_presets(symbol),
+            })
+            return
         self._send({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -265,185 +277,464 @@ class SignalHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+# --- Symbol detection (mirrors EA logic) ---
+_CRYPTO_PREFIXES = {
+    "SOL", "BTC", "ETH", "BNB", "XRP", "ADA", "DOGE", "DOT",
+    "LTC", "MATIC", "AVAX", "LINK", "UNI", "ATOM", "FIL",
+    "APT", "ARB", "OP", "SUI", "TRX", "TON", "NEAR", "ICP",
+    "BCH", "EOS", "ETC", "VET", "ALGO", "MANA", "SAND",
+    "AXS", "EGLD", "RUNE", "FTM", "FLOW", "GRT", "IMX", "SNX",
+    "XTZ", "THETA", "ZEC", "DASH", "NEO", "QTUM", "OMG", "BAT",
+    "ZRX", "ENJ", "CHZ", "CELO", "COMP", "MKR", "YFI", "CRV",
+}
+
+
+def _detect_asset_class(symbol: str) -> str:
+    upper = symbol.upper()
+    if "XAU" in upper or "XAG" in upper or "XPD" in upper or "XPT" in upper:
+        return "gold"
+    for prefix in _CRYPTO_PREFIXES:
+        if upper.startswith(prefix):
+            return "crypto"
+    if "USD" in upper:
+        base = upper.split("USD")[0]
+        if base:
+            for prefix in _CRYPTO_PREFIXES:
+                if prefix in base:
+                    return "crypto"
+            if len(base) == 3 and base.isalpha():
+                return "forex"
+    return "other"
+
+
+def _asset_presets(symbol: str) -> dict[str, Any]:
+    asset = _detect_asset_class(symbol)
+    if asset == "gold":
+        return {
+            "type": "gold", "icon": "🥇",
+            "max_spread_pct": 0.15,
+            "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
+            "atr_period": 14, "rsi_period": 14,
+            "sl_atr": 1.3, "tp_atr": 1.8,
+            "min_confidence": 0.62, "llm_min_score": 0.65,
+            "risk_percent": 0.25, "cooldown": 180,
+            "description": "Gold — moderate volatility, trend-following EMA cross + ATR stops",
+        }
+    if asset == "crypto":
+        return {
+            "type": "crypto", "icon": "💎",
+            "max_spread_pct": 3.0,
+            "ema_fast": 5, "ema_slow": 13, "ema_trend": 34,
+            "atr_period": 10, "rsi_period": 10,
+            "sl_atr": 1.8, "tp_atr": 3.0,
+            "min_confidence": 0.55, "llm_min_score": 0.60,
+            "risk_percent": 0.15, "cooldown": 300,
+            "description": "Crypto — high volatility, fast EMAs, wider stops, lower risk per trade",
+        }
+    if asset == "forex":
+        return {
+            "type": "forex", "icon": "💱",
+            "max_spread_pct": 0.30,
+            "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
+            "atr_period": 14, "rsi_period": 14,
+            "sl_atr": 1.3, "tp_atr": 2.0,
+            "min_confidence": 0.62, "llm_min_score": 0.65,
+            "risk_percent": 0.25, "cooldown": 180,
+            "description": "Forex — stable, tight spreads, EMA crossover + RSI confirmation",
+        }
+    return {
+        "type": "other", "icon": "📊",
+        "max_spread_pct": 0.50,
+        "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
+        "atr_period": 14, "rsi_period": 14,
+        "sl_atr": 1.3, "tp_atr": 1.8,
+        "min_confidence": 0.62, "llm_min_score": 0.65,
+        "risk_percent": 0.25, "cooldown": 180,
+        "description": "Unknown — default trend scalper settings",
+    }
+
+
 def dashboard_html(auto_token: str = "") -> str:
     return DASHBOARD_HTML_TEMPLATE.replace("__AUTO_SIGNAL_TOKEN__", json.dumps(auto_token))
 
 
-DASHBOARD_HTML_TEMPLATE = """<!doctype html>
+DASHBOARD_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Trend Scalper Monitor</title>
-  <style>
-    :root { color-scheme: dark; font-family: Inter, Segoe UI, Arial, sans-serif; }
-    body { margin: 0; background: #080b12; color: #e8eefc; }
-    header { padding: 24px; border-bottom: 1px solid #1f2937; background: linear-gradient(135deg,#111827,#0f172a); }
-    h1 { margin: 0 0 8px; font-size: 26px; }
-    main { padding: 20px; display: grid; gap: 18px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: 12px; }
-    .card, .panel { background: #111827; border: 1px solid #263244; border-radius: 14px; padding: 16px; box-shadow: 0 10px 30px #0004; }
-    .label { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-    .value { font-size: 24px; font-weight: 700; margin-top: 6px; }
-    input, select { background: #0b1220; color: #e8eefc; border: 1px solid #334155; border-radius: 10px; padding: 10px; min-width: 160px; }
-    button { background: #2563eb; color: white; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; }
-    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
-    .field { display: grid; gap: 6px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; border-bottom: 1px solid #263244; padding: 10px 8px; vertical-align: top; }
-    th { color: #93c5fd; position: sticky; top: 0; background: #111827; }
-    .BUY { color: #22c55e; font-weight: 700; }
-    .SELL { color: #ef4444; font-weight: 700; }
-    .HOLD { color: #f59e0b; font-weight: 700; }
-    .muted { color: #94a3b8; }
-    .error { color: #fca5a5; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trend Scalper AI · Dashboard</title>
+<style>
+:root{color-scheme:dark;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;--bg:#090b10;--surface:#11151e;--border:#1e2433;--muted:#6b7280;--accent:#6366f1;--green:#10b981;--red:#ef4444;--amber:#f59e0b;--text:#e5e7eb;--card-bg:#161b26;--hover:#1f2937}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);min-height:100vh}
+header{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;backdrop-filter:blur(12px)}
+h1{font-size:20px;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:10px}
+h1 span{background:linear-gradient(135deg,var(--accent),#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.dot{width:8px;height:8px;border-radius:99px;display:inline-block;animation:pulse 2s infinite}
+.dot-online{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot-offline{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+main{padding:20px 28px;display:grid;gap:18px;max-width:1440px;margin:0 auto}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.row-center{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.row-spread{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.grid3{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px}
+.panel h2{font-size:15px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px;transition:all .15s}
+.card:hover{border-color:var(--accent)}
+.card .label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.card .value{font-size:22px;font-weight:700;margin-top:3px;overflow:hidden;text-overflow:ellipsis}
+.card .sub{font-size:11px;color:var(--muted);margin-top:2px}
+input,select{background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:13px;outline:none;transition:border .15s}
+input:focus,select:focus{border-color:var(--accent)}
+input[type=number]{width:80px}
+button{border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+button:hover{filter:brightness(1.15)}
+.btn-accent{background:var(--accent);color:#fff}
+.btn-green{background:var(--green);color:#fff}
+.btn-red{background:var(--red);color:#fff}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.field{display:grid;gap:3px}
+.field .label{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}
+.badge{font-size:10px;padding:2px 9px;border-radius:99px;font-weight:600}
+.badge-live{background:var(--green)22;color:var(--green);border:1px solid var(--green)44}
+.badge-dry{background:var(--red)22;color:var(--red);border:1px solid var(--red)44}
+.badge-llm{background:#a855f722;color:#a855f7;border:1px solid #a855f744}
+.divider{height:1px;background:var(--border);margin:14px 0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td,th{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--surface);position:sticky;top:0}
+th:first-child,td:first-child{border-radius:8px 0 0 8px}
+th:last-child,td:last-child{border-radius:0 8px 8px 0}
+.action-BUY{color:var(--green);font-weight:700}
+.action-SELL{color:var(--red);font-weight:700}
+.action-HOLD{color:var(--amber);font-weight:700}
+.muted{color:var(--muted);font-size:12px}
+.error{color:var(--red)}
+.pill{font-size:11px;padding:3px 8px;border-radius:6px;cursor:pointer;transition:all .15s;border:1px solid transparent}
+.pill:hover{border-color:var(--accent)}
+.pill.active{background:var(--accent)22;color:var(--accent);border-color:var(--accent)44}
+.tabs{display:flex;gap:6px;margin-bottom:14px}
+.hidden{display:none!important}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--green);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:99;animation:fadeIn .3s,fadeOut .3s 1.7s forwards}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(10px)}}
+</style>
 </head>
 <body>
-  <header>
-    <h1>Trend Scalper Monitor</h1>
-    <div class="muted">Live dashboard for the Docker signal service and MT5 executor EA.</div>
-  </header>
-  <main>
-    <section class="panel">
-      <div class="label">Signal Token</div>
-      <div class="row">
-        <input id="token" type="password" placeholder="Paste SIGNAL_TOKEN if API is protected">
-        <button onclick="saveToken()">Save Token</button>
-        <button onclick="refresh()">Refresh</button>
-      </div>
-      <span id="message" class="muted"></span>
-    </section>
-    <section class="panel">
-      <h2>Edit Agent Runtime</h2>
-      <div class="row">
-        <label class="field"><span class="label">Mode</span>
-          <select id="editMode">
-            <option value="paper">paper</option>
-            <option value="live">live</option>
-            <option value="bridge">bridge</option>
-          </select>
-        </label>
-        <label class="field"><span class="label">Dry Run</span>
-          <select id="editDryRun">
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </label>
-        <label class="field"><span class="label">LLM</span>
-          <select id="editLlm">
-            <option value="false">false</option>
-            <option value="true">true</option>
-          </select>
-        </label>
-        <label class="field"><span class="label">LLM Fail Closed</span>
-          <select id="editLlmFailClosed">
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </label>
-        <button onclick="saveRuntimeSettings()">Save Runtime</button>
-      </div>
-      <p class="muted">Fail Closed=true blocks trades when DeepSeek times out. Fail Closed=false lets deterministic signals continue if DeepSeek is unavailable. MT5 order execution still depends on the EA input <code>DryRun</code>.</p>
-    </section>
-    <section class="grid" id="cards"></section>
-    <section class="panel">
-      <h2>Recent Events</h2>
-      <table>
-        <thead><tr><th>Time</th><th>Type</th><th>Symbol</th><th>Action</th><th>Confidence</th><th>Spread</th><th>Reason</th></tr></thead>
-        <tbody id="events"><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
-      </table>
-    </section>
-  </main>
-  <script>
-    window.__SIGNAL_TOKEN__ = __AUTO_SIGNAL_TOKEN__;
-    const tokenInput = document.getElementById('token');
-    tokenInput.value = localStorage.getItem('signalToken') || window.__SIGNAL_TOKEN__ || '';
-    function headers() {
-      const token = tokenInput.value.trim();
-      return token ? {'Authorization': `Bearer ${token}`} : {};
-    }
-    function saveToken() {
-      localStorage.setItem('signalToken', tokenInput.value.trim());
-      refresh();
-    }
-    async function getJson(path) {
-      const response = await fetch(path, {headers: headers()});
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      return response.json();
-    }
-    async function postJson(path, payload) {
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', ...headers()},
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-      return response.json();
-    }
-    function boolString(value) { return value ? 'true' : 'false'; }
-    function card(label, value) {
-      return `<div class="card"><div class="label">${label}</div><div class="value">${value ?? '-'}</div></div>`;
-    }
-    async function saveRuntimeSettings() {
-      try {
-        await postJson('/api/settings', {
-          trading_mode: document.getElementById('editMode').value,
-          dry_run: document.getElementById('editDryRun').value === 'true',
-          use_llm: document.getElementById('editLlm').value === 'true',
-          llm_fail_closed: document.getElementById('editLlmFailClosed').value === 'true'
-        });
-        await refresh();
-      } catch (error) {
-        const msg = document.getElementById('message');
-        msg.textContent = `Save failed: ${error.message}`;
-        msg.className = 'error';
-      }
-    }
-    async function refresh() {
-      const msg = document.getElementById('message');
-      try {
-        const status = await getJson('/api/status');
-        const events = await getJson('/api/events?limit=100');
-        const settings = status.settings || {};
-        const summary = status.summary || {};
-        const risk = status.risk_state || {};
-        document.getElementById('editMode').value = settings.trading_mode || 'paper';
-        document.getElementById('editDryRun').value = boolString(settings.dry_run);
-        document.getElementById('editLlm').value = boolString(settings.use_llm);
-        document.getElementById('editLlmFailClosed').value = boolString(settings.llm_fail_closed);
-        document.getElementById('cards').innerHTML = [
-          card('Service', status.ok ? 'OK' : 'DOWN'),
-          card('Mode', settings.trading_mode),
-          card('Dry Run', settings.dry_run),
-          card('LLM', settings.use_llm),
-          card('LLM Fail Closed', settings.llm_fail_closed),
-          card('Signals', summary.events_count || 0),
-          card('BUY', (summary.actions || {}).BUY || 0),
-          card('SELL', (summary.actions || {}).SELL || 0),
-          card('HOLD', (summary.actions || {}).HOLD || 0),
-          card('Trades Today', risk.trades_count ?? 0),
-          card('Trade Success', summary.trade_success || 0)
-        ].join('');
-        document.getElementById('events').innerHTML = (events.events || []).map(row => `
-          <tr>
-            <td>${row.ts || ''}</td><td>${row.type || ''}</td><td>${row.symbol || ''}</td>
-            <td class="${row.action || ''}">${row.action || ''}</td><td>${row.confidence ?? ''}</td>
-            <td>${row.spread_points ?? ''}</td><td>${row.reason || ''}</td>
-          </tr>`).join('') || '<tr><td colspan="7" class="muted">No events yet</td></tr>';
-        msg.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-        msg.className = 'muted';
-      } catch (error) {
-        msg.textContent = `Dashboard API error: ${error.message}`;
-        msg.className = 'error';
-      }
-    }
-    refresh();
-    setInterval(refresh, 5000);
-  </script>
+<header>
+<h1>⚡ <span>Trend Scalper AI</span></h1>
+<div id="topBar" class="row-center" style="gap:14px;font-size:12px;color:var(--muted)">Loading...</div>
+</header>
+<main>
+
+<!-- Quick Stats Row -->
+<section class="grid3" id="statCards"></section>
+
+<!-- Asset Selector + Presets -->
+<section class="panel">
+  <h2>🎯 Smart Asset Selector</h2>
+  <div class="row" style="gap:10px;flex-wrap:wrap">
+    <label class="field">
+      <span class="label">Symbol</span>
+      <input id="symInput" type="text" value="SOLUSD" style="width:110px" onchange="onSymbolChange()" oninput="clearTimeout(symTimeout);symTimeout=setTimeout(onSymbolChange,400)">
+    </label>
+    <button onclick="onSymbolChange()" class="btn-outline">🔍 Detect</button>
+    <span id="symResult" class="muted"></span>
+    <span style="margin-left:auto" id="presetInfo"></span>
+    <button onclick="applyPresets()" class="btn-accent">⚡ Apply Presets</button>
+  </div>
+  <div class="divider"></div>
+  <div class="tabs" id="assetTabs">
+    <div class="pill active" onclick="selectAsset('crypto')">💎 Crypto</div>
+    <div class="pill" onclick="selectAsset('forex')">💱 Forex</div>
+    <div class="pill" onclick="selectAsset('gold')">🥇 Gold</div>
+    <div class="pill" onclick="selectAsset('other')">📊 Other</div>
+  </div>
+  <div id="presetDetails" class="row" style="gap:12px;flex-wrap:wrap"></div>
+</section>
+
+<!-- Live Control Panel -->
+<section class="panel">
+  <div class="row-spread">
+    <h2>🎛 Live Control <span id="eaBadge" class="badge badge-live">LIVE</span></h2>
+    <div class="row" style="gap:8px">
+      <label class="field"><span class="label">Trading</span><select id="cfgMode"><option value="live">live</option><option value="paper">paper</option><option value="bridge">bridge</option></select></label>
+      <label class="field"><span class="label">Dry Run</span><select id="cfgDry"><option value="true">true</option><option value="false">false</option></select></label>
+      <label class="field"><span class="label">LLM</span><select id="cfgLlm"><option value="false">off</option><option value="true">on</option></select></label>
+      <label class="field"><span class="label">Fail Closed</span><select id="cfgFail"><option value="true">true</option><option value="false">false</option></select></label>
+      <button onclick="saveCoreSettings()" class="btn-accent">Save</button>
+    </div>
+  </div>
+</section>
+
+<!-- Strategy Parameters -->
+<section class="panel">
+  <h2>📊 Strategy</h2>
+  <div class="row" style="flex-wrap:wrap;gap:10px">
+    <label class="field"><span class="label">Timeframe</span><select id="cfgTf"><option>M1</option><option>M5</option><option>M15</option><option>H1</option><option>H4</option><option>D1</option></select></label>
+    <label class="field"><span class="label">Bars</span><input id="cfgBars" type="number" min="50" max="1000" value="300"></label>
+    <label class="field"><span class="label">EMA Fast</span><input id="cfgEmaF" type="number" min="2" max="200" value="8"></label>
+    <label class="field"><span class="label">EMA Slow</span><input id="cfgEmaS" type="number" min="3" max="200" value="21"></label>
+    <label class="field"><span class="label">EMA Trend</span><input id="cfgEmaT" type="number" min="5" max="500" value="55"></label>
+    <label class="field"><span class="label">ATR</span><input id="cfgAtr" type="number" min="2" max="100" value="14"></label>
+    <label class="field"><span class="label">RSI</span><input id="cfgRsi" type="number" min="2" max="100" value="14"></label>
+    <label class="field"><span class="label">SL Mult</span><input id="cfgSlAtr" type="number" step="0.1" min="0.5" max="5" value="1.3"></label>
+    <label class="field"><span class="label">TP Mult</span><input id="cfgTpAtr" type="number" step="0.1" min="0.5" max="10" value="1.8"></label>
+    <label class="field"><span class="label">Min Stop</span><input id="cfgMinStop" type="number" min="10" max="1000" value="80"></label>
+    <label class="field"><span class="label">Confidence</span><input id="cfgMinConf" type="number" step="0.01" min="0" max="1" value="0.62"></label>
+    <button onclick="saveStrategy()" class="btn-green">Save</button>
+  </div>
+</section>
+
+<!-- EA Execution -->
+<section class="panel">
+  <h2>🤖 MT5 EA</h2>
+  <div class="row" style="flex-wrap:wrap;gap:10px">
+    <label class="field"><span class="label">Max Spread %</span><input id="cfgSpreadPct" type="number" step="0.1" min="0" max="100" value="0" style="width:80px"></label>
+    <label class="field"><span class="label">Spread Pts</span><input id="cfgSpreadPts" type="number" min="0" value="0" style="width:80px"></label>
+    <label class="field"><span class="label">Lots</span><input id="cfgLots" type="number" step="0.01" min="0.01" max="100" value="0.01" style="width:80px"></label>
+    <label class="field"><span class="label">Max Positions</span><input id="cfgMaxPos" type="number" min="1" max="100" value="1" style="width:80px"></label>
+    <label class="field"><span class="label">Cooldown</span><input id="cfgCooldown" type="number" min="0" value="180" style="width:80px"></label>
+    <label class="field"><span class="label">Magic</span><input id="cfgMagic" type="number" value="260618" style="width:90px"></label>
+    <label class="field"><span class="label">Deviation</span><input id="cfgDev" type="number" min="0" value="20" style="width:80px"></label>
+    <label class="field"><span class="label">1 Trade/Bar</span><select id="cfgOneBar"><option value="true">on</option><option value="false">off</option></select></label>
+    <button onclick="saveEaSettings()" class="btn-green">Save EA</button>
+  </div>
+</section>
+
+<!-- Risk + LLM -->
+<section class="panel">
+  <h2>🛡 Risk & 🤖 LLM</h2>
+  <div class="row" style="flex-wrap:wrap;gap:10px">
+    <label class="field"><span class="label">Risk %</span><input id="cfgRiskPct" type="number" step="0.01" min="0.01" max="5" value="0.25" style="width:80px"></label>
+    <label class="field"><span class="label">Daily Loss %</span><input id="cfgDailyLoss" type="number" step="0.1" min="0" max="100" value="2.0" style="width:90px"></label>
+    <label class="field"><span class="label">Max Trades/Day</span><input id="cfgMaxTrades" type="number" min="1" max="1000" value="8" style="width:90px"></label>
+    <label class="field"><span class="label">LLM Min Score</span><input id="cfgLlmScore" type="number" step="0.01" min="0" max="1" value="0.65" style="width:90px"></label>
+    <label class="field"><span class="label">LLM Timeout</span><input id="cfgLlmTimeout" type="number" min="1" max="60" value="8" style="width:80px"></label>
+    <button onclick="saveStrategy()" class="btn-accent">Save</button>
+  </div>
+</section>
+
+<!-- Events Table -->
+<section class="panel">
+  <h2>📋 Live Events</h2>
+  <div style="max-height:400px;overflow-y:auto">
+    <table><thead><tr><th>Time</th><th>Type</th><th>Symbol</th><th>Action</th><th>Conf</th><th>Reason</th></tr></thead>
+    <tbody id="eventsTable"><tr><td colspan="6" class="muted">Loading...</td></tr></tbody></table>
+  </div>
+</section>
+
+<div id="toast" class="hidden"></div>
+</main>
+<script>
+window.SIGTOKEN=__AUTO_SIGNAL_TOKEN__;
+const tokenInput=document.getElementById('tokenInput')||null;
+let symTimeout=null;
+let currentPreset=null;
+const h=()=>{const t=localStorage.getItem('signalToken')||window.SIGTOKEN||'';return t?{Authorization:`Bearer ${t}`}:{}};
+async function G(p){const r=await fetch(p,{headers:h()});if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}
+async function P(p,d){const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json',...h()},body:JSON.stringify(d)});if(!r.ok)throw new Error(r.status+' '+ (await r.text()));return r.json()}
+function B(v){return v?'true':'false'}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast';setTimeout(()=>t.className='hidden',2200)}
+
+let gPresets={};
+let gDetectedType='other';
+
+async function onSymbolChange(){
+  const sym=document.getElementById('symInput').value.trim().toUpperCase()||'SOLUSD';
+  const result=document.getElementById('symResult');
+  try{
+    const info=await G('/api/symbol-info?symbol='+encodeURIComponent(sym));
+    gPresets=info.presets||{};
+    gDetectedType=info.type||'other';
+    result.innerHTML=`<span style="color:var(--accent)">${info.type.toUpperCase()}</span> ${gPresets.icon||''}`;
+    selectAsset(gDetectedType);
+    renderPresets();
+  }catch(e){result.innerHTML=`<span class="error">${e.message}</span>`}
+}
+
+function selectAsset(type){
+  gDetectedType=type;
+  const tabs=document.querySelectorAll('#assetTabs .pill');
+  tabs.forEach(t=>t.classList.remove('active'));
+  if(type==='crypto')tabs[0].classList.add('active');
+  else if(type==='forex')tabs[1].classList.add('active');
+  else if(type==='gold')tabs[2].classList.add('active');
+  else tabs[3].classList.add('active');
+  // fetch presets for this type
+  fetchPresetsForType(type);
+}
+
+async function fetchPresetsForType(type){
+  const sym=document.getElementById('symInput').value.trim().toUpperCase();
+  const lookupSym={'crypto':'SOLUSD','forex':'EURUSD','gold':'XAUUSD','other':'XAUUSD'};
+  try{
+    const info=await G('/api/symbol-info?symbol='+encodeURIComponent(lookupSym[type]||sym));
+    gPresets=info.presets||{};
+    gDetectedType=info.type||type;
+    renderPresets();
+  }catch(e){}
+}
+
+function renderPresets(){
+  const el=document.getElementById('presetDetails');
+  const p=gPresets;
+  el.innerHTML=`
+    <span class="label">${p.icon||''} ${(p.type||'?').toUpperCase()} — ${p.description||''}</span>
+    <span class="label">Spread≤${p.max_spread_pct||0}% EMA(${p.ema_fast}/${p.ema_slow}/${p.ema_trend}) ATR${p.atr_period} RSI${p.rsi_period} SLx${p.sl_atr} TPx${p.tp_atr} Conf≥${p.min_confidence} Risk${p.risk_percent}%</span>`;
+}
+
+function applyPresets(){
+  const p=gPresets;
+  document.getElementById('cfgSpreadPct').value=p.max_spread_pct||0;
+  document.getElementById('cfgEmaF').value=p.ema_fast||8;
+  document.getElementById('cfgEmaS').value=p.ema_slow||21;
+  document.getElementById('cfgEmaT').value=p.ema_trend||55;
+  document.getElementById('cfgAtr').value=p.atr_period||14;
+  document.getElementById('cfgRsi').value=p.rsi_period||14;
+  document.getElementById('cfgSlAtr').value=p.sl_atr||1.3;
+  document.getElementById('cfgTpAtr').value=p.tp_atr||1.8;
+  document.getElementById('cfgMinConf').value=p.min_confidence||0.62;
+  document.getElementById('cfgLlmScore').value=p.llm_min_score||0.65;
+  document.getElementById('cfgRiskPct').value=p.risk_percent||0.25;
+  document.getElementById('cfgCooldown').value=p.cooldown||180;
+  toast('✅ Presets applied! Click Save buttons to persist.');
+}
+
+async function saveCoreSettings(){
+  await P('/api/settings',{
+    trading_mode:document.getElementById('cfgMode').value,
+    dry_run:document.getElementById('cfgDry').value==='true',
+    use_llm:document.getElementById('cfgLlm').value==='true',
+    llm_fail_closed:document.getElementById('cfgFail').value==='true'});
+  await refresh();toast('Core settings saved')
+}
+
+async function saveStrategy(){
+  const p={
+    symbol:document.getElementById('symInput').value.trim().toUpperCase(),
+    timeframe:document.getElementById('cfgTf').value,
+    bars:parseInt(document.getElementById('cfgBars').value),
+    ema_fast:parseInt(document.getElementById('cfgEmaF').value),
+    ema_slow:parseInt(document.getElementById('cfgEmaS').value),
+    ema_trend:parseInt(document.getElementById('cfgEmaT').value),
+    atr_period:parseInt(document.getElementById('cfgAtr').value),
+    rsi_period:parseInt(document.getElementById('cfgRsi').value),
+    sl_atr_multiplier:parseFloat(document.getElementById('cfgSlAtr').value),
+    tp_atr_multiplier:parseFloat(document.getElementById('cfgTpAtr').value),
+    min_stop_points:parseInt(document.getElementById('cfgMinStop').value),
+    min_signal_confidence:parseFloat(document.getElementById('cfgMinConf').value),
+    llm_min_score:parseFloat(document.getElementById('cfgLlmScore').value),
+    risk_percent:parseFloat(document.getElementById('cfgRiskPct').value),
+    daily_loss_limit_percent:parseFloat(document.getElementById('cfgDailyLoss').value),
+    max_trades_per_day:parseInt(document.getElementById('cfgMaxTrades').value),
+    llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value)};
+  await P('/api/settings',p);await refresh();toast('Strategy saved')
+}
+
+async function saveEaSettings(){
+  await P('/api/settings',{
+    dry_run:document.getElementById('cfgDry').value==='true',
+    lots:parseFloat(document.getElementById('cfgLots').value),
+    max_positions:parseInt(document.getElementById('cfgMaxPos').value),
+    max_spread_points:parseInt(document.getElementById('cfgSpreadPts').value),
+    max_spread_percent:parseFloat(document.getElementById('cfgSpreadPct').value),
+    cooldown_seconds:parseInt(document.getElementById('cfgCooldown').value),
+    magic_number:parseInt(document.getElementById('cfgMagic').value),
+    deviation_points:parseInt(document.getElementById('cfgDev').value),
+    one_trade_per_bar:document.getElementById('cfgOneBar').value==='true'});
+  await refresh();toast('EA settings saved')
+}
+
+async function refresh(){
+  try{
+    const status=await G('/api/status');
+    const runtime=await G('/api/runtime-settings');
+    const eventsR=await G('/api/events?limit=80');
+    const s=status.settings||{},sum=status.summary||{},risk=status.risk_state||{},events=eventsR.events||[];
+
+    // Populate forms
+    document.getElementById('symInput').value=s.symbol||'SOLUSD';
+    document.getElementById('cfgMode').value=s.trading_mode||'live';
+    document.getElementById('cfgDry').value=B(s.dry_run);
+    document.getElementById('cfgLlm').value=B(s.use_llm);
+    document.getElementById('cfgFail').value=B(s.llm_fail_closed);
+    document.getElementById('cfgTf').value=s.timeframe||'M1';
+    document.getElementById('cfgBars').value=s.bars||300;
+    document.getElementById('cfgEmaF').value=s.ema_fast||8;
+    document.getElementById('cfgEmaS').value=s.ema_slow||21;
+    document.getElementById('cfgEmaT').value=s.ema_trend||55;
+    document.getElementById('cfgAtr').value=s.atr_period||14;
+    document.getElementById('cfgRsi').value=s.rsi_period||14;
+    document.getElementById('cfgSlAtr').value=s.sl_atr_multiplier||1.3;
+    document.getElementById('cfgTpAtr').value=s.tp_atr_multiplier||1.8;
+    document.getElementById('cfgMinStop').value=s.min_stop_points||80;
+    document.getElementById('cfgMinConf').value=s.min_signal_confidence||0.62;
+    document.getElementById('cfgLlmScore').value=s.llm_min_score||0.65;
+    document.getElementById('cfgLlmTimeout').value=s.llm_timeout_seconds||8;
+    document.getElementById('cfgRiskPct').value=s.risk_percent||0.25;
+    document.getElementById('cfgDailyLoss').value=s.daily_loss_limit_percent||2.0;
+    document.getElementById('cfgMaxTrades').value=s.max_trades_per_day||8;
+    document.getElementById('cfgSpreadPct').value=runtime.max_spread_percent!=null?runtime.max_spread_percent:0;
+    document.getElementById('cfgSpreadPts').value=runtime.max_spread_points||0;
+    document.getElementById('cfgLots').value=runtime.lots||0.01;
+    document.getElementById('cfgMaxPos').value=runtime.max_positions||1;
+    document.getElementById('cfgCooldown').value=runtime.cooldown_seconds||180;
+    document.getElementById('cfgMagic').value=runtime.magic_number||260618;
+    document.getElementById('cfgDev').value=runtime.deviation_points||20;
+    document.getElementById('cfgOneBar').value=B(runtime.one_trade_per_bar);
+
+    // Top bar
+    document.getElementById('topBar').innerHTML=`
+      <span class="dot dot-${status.ok?'online':'offline'}"></span>
+      <span>${status.ok?'ONLINE':'DOWN'}</span>
+      <span style="opacity:0.5">|</span>
+      <span>${s.trading_mode||'?'}</span>
+      <span style="opacity:0.5">|</span>
+      <span>${s.symbol||'?'}·${s.timeframe||'?'}</span>
+      <span style="opacity:0.5">|</span>
+      <span>LLM ${s.use_llm?'<span style="color:var(--accent)">on</span>':'off'}</span>
+      <span style="opacity:0.5">|</span>
+      <span>🕐 ${(s.server_time||'').slice(11,19)}</span>`;
+
+    // EA badge
+    const badge=document.getElementById('eaBadge');
+    if(runtime.dry_run===false){badge.className='badge badge-live';badge.textContent='LIVE 🔴'}
+    else{badge.className='badge badge-dry';badge.textContent='DRY RUN'}
+
+    // Stat cards
+    document.getElementById('statCards').innerHTML=[
+      ['⚡ Signals',sum.events_count||0,''],
+      ['🟢 BUY',(sum.actions||{}).BUY||0,'action-BUY'],
+      ['🔴 SELL',(sum.actions||{}).SELL||0,'action-SELL'],
+      ['🟡 HOLD',(sum.actions||{}).HOLD||0,'action-HOLD'],
+      ['📈 Trades',risk.trades_count??0,''],
+      ['✅ Wins',sum.trade_success||0,''],
+      ['❌ Losses',sum.trade_failed||0,''],
+      ['💰 Bal','$'+(risk.balance!=null?Number(risk.balance).toFixed(2):'-'),''],
+      ['📊 PnL',risk.daily_pnl_pct!=null?Number(risk.daily_pnl_pct).toFixed(2)+'%':'-',''],
+      ['🤖 LLM',s.use_llm?'Active':'Off',s.use_llm?'':'muted']
+    ].map(([l,v,c])=>`<div class="card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+
+    // Events
+    document.getElementById('eventsTable').innerHTML=events.length?events.slice(0,60).map(r=>`<tr>
+      <td>${(r.ts||'').slice(11,19)}</td><td>${r.type||''}</td><td>${r.symbol||''}</td>
+      <td><span class="action-${r.action||''}">${r.action||''}</span></td>
+      <td>${r.confidence!=null?r.confidence.toFixed(3):''}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.reason||''}">${r.reason||''}</td>
+    </tr>`).join(''):'<tr><td colspan="6" class="muted">No events yet</td></tr>';
+  }catch(e){console.error('refresh failed',e)}
+}
+
+onSymbolChange();
+refresh();
+setInterval(refresh,4000);
+</script>
 </body>
-</html>
-"""
+</html>"""
 
 
 def configure_logging(level: str) -> None:
