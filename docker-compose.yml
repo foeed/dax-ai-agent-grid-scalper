@@ -1,0 +1,39 @@
+services:
+  bot:
+    build: .
+    image: trend-scalper-ai:latest
+    pull_policy: build
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      DRY_RUN: ${DRY_RUN:-true}
+      USE_LLM: ${USE_LLM:-false}
+      PYTHONPATH: /app/src
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+  signal-service:
+    build: .
+    image: trend-scalper-ai:latest
+    pull_policy: build
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      DRY_RUN: ${DRY_RUN:-true}
+      USE_LLM: ${USE_LLM:-false}
+      SIGNAL_HOST: 0.0.0.0
+      SIGNAL_PORT: ${SIGNAL_PORT:-8766}
+      SIGNAL_TOKEN: ${SIGNAL_TOKEN:-}
+      PYTHONPATH: /app/src
+    ports:
+      - "${SIGNAL_PORT:-8766}:8766"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: ["python", "-m", "trend_scalper.signal_service"]
+    restart: unless-stopped

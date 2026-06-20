@@ -1,0 +1,3 @@
+# Runtime uses only the Python standard library.
+# DeepSeek calls are made over HTTPS directly.
+# Install requirements-mt5.txt on Windows for live MT5 execution.
