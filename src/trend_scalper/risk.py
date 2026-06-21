@@ -24,18 +24,22 @@ class RiskManager:
         self.path = settings.state_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def can_trade(self, account: AccountSnapshot) -> tuple[bool, str]:
+    def can_trade(self, account: AccountSnapshot, runtime: dict[str, Any] | None = None) -> tuple[bool, str]:
         state = self._load_state(account)
         now = time.time()
 
-        if state.trades_count >= self.settings.max_trades_per_day:
+        max_trades = int((runtime or {}).get("max_trades_per_day", self.settings.max_trades_per_day))
+        cooldown = int((runtime or {}).get("cooldown_seconds", self.settings.cooldown_seconds))
+        daily_loss = float((runtime or {}).get("daily_loss_limit_percent", self.settings.daily_loss_limit_percent))
+
+        if state.trades_count >= max_trades:
             return False, "Max trades per day reached"
 
-        if now - state.last_trade_ts < self.settings.cooldown_seconds:
-            remaining = int(self.settings.cooldown_seconds - (now - state.last_trade_ts))
+        if now - state.last_trade_ts < cooldown:
+            remaining = int(cooldown - (now - state.last_trade_ts))
             return False, f"Cooldown active for {remaining}s"
 
-        max_loss = state.start_equity * (self.settings.daily_loss_limit_percent / 100)
+        max_loss = state.start_equity * (daily_loss / 100)
         if account.equity <= state.start_equity - max_loss:
             return False, "Daily loss limit reached"
 

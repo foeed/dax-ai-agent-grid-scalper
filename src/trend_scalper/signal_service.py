@@ -4,6 +4,8 @@ import argparse
 import json
 import logging
 import math
+import threading
+import time as time_module
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -45,25 +47,29 @@ class SignalEngine:
         spread_points = float(payload.get("spread_points", 0.0))
         positions_count = int(payload.get("positions_count", 0))
 
-        allowed, risk_reason = self.risk.can_trade(account)
+        runtime = self.runtime_settings.effective()
+        allowed, risk_reason = self.risk.can_trade(account, runtime)
         if not allowed:
             return self._hold(risk_reason)
 
-        if self.settings.max_spread_points > 0 and spread_points > self.settings.max_spread_points:
+        max_spread = self.settings.max_spread_points
+        if max_spread > 0 and spread_points > max_spread:
             return self._hold(
-                f"Spread blocked trade: {spread_points:.1f} > {self.settings.max_spread_points:.1f}"
+                f"Spread blocked trade: {spread_points:.1f} > {max_spread:.1f}"
             )
 
-        if positions_count >= self.settings.max_positions:
+        max_pos = self.settings.max_positions
+        if positions_count >= max_pos:
             return self._hold(
-                f"Position cap blocked trade: {positions_count} >= {self.settings.max_positions}"
+                f"Position cap blocked trade: {positions_count} >= {max_pos}"
             )
 
-        signal = self.strategy.analyze(rates, point)
+        signal = self._analyze_with_runtime(rates, point, runtime)
         if not signal.is_trade:
             return self._hold(signal.reason, signal.confidence)
 
-        runtime = self.runtime_settings.effective()
+        # Use runtime LLM min score override if available, else .env default
+        llm_min_score = runtime.get("llm_min_score", self.settings.llm_min_score)
         llm_filter = self._llm_filter(runtime)
         if llm_filter:
             decision = llm_filter.review(
@@ -76,7 +82,7 @@ class SignalEngine:
                 timeframe=str(payload.get("timeframe", self.settings.timeframe)),
                 fail_closed=bool(runtime["llm_fail_closed"]),
             )
-            if not decision.approved or decision.score < self.settings.llm_min_score:
+            if not decision.approved or decision.score < llm_min_score:
                 return self._hold(f"DeepSeek blocked: {decision.reason}", decision.score)
 
         sl_points = max(1, int(math.ceil(signal.sl_distance / point)))
@@ -137,6 +143,10 @@ class SignalEngine:
 
     def _default_point(self) -> float:
         return 0.01 if self.settings.symbol.upper().startswith("XAU") else 0.00001
+
+    def _analyze_with_runtime(self, rates: list[Rate], point: float, runtime: dict[str, Any]) -> Any:
+        """Run strategy analysis using runtime dashboard overrides."""
+        return self.strategy.analyze(rates, point, runtime)
 
     def _hold(self, reason: str, confidence: float = 0.0) -> dict[str, Any]:
         return {

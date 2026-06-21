@@ -9,17 +9,18 @@ class TrendScalperStrategy:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def analyze(self, rates: list[Rate], point: float) -> TradeSignal:
+    def analyze(self, rates: list[Rate], point: float, runtime: dict | None = None) -> TradeSignal:
+        r = runtime or {}
         if len(rates) < self.settings.bars // 2:
             return TradeSignal("HOLD", 0.0, "Not enough bars")
 
         data = add_indicators(
             rates,
-            ema_fast=self.settings.ema_fast,
-            ema_slow=self.settings.ema_slow,
-            ema_trend=self.settings.ema_trend,
-            atr_period=self.settings.atr_period,
-            rsi_period=self.settings.rsi_period,
+            ema_fast=int(r.get("ema_fast", self.settings.ema_fast)),
+            ema_slow=int(r.get("ema_slow", self.settings.ema_slow)),
+            ema_trend=int(r.get("ema_trend", self.settings.ema_trend)),
+            atr_period=int(r.get("atr_period", self.settings.atr_period)),
+            rsi_period=int(r.get("rsi_period", self.settings.rsi_period)),
         )
         data = [row for row in data if self._row_ready(row)]
 
@@ -47,7 +48,8 @@ class TrendScalperStrategy:
             return TradeSignal("HOLD", 0.0, "No directional edge")
 
         confidence = min(0.95, round(score / 5.0, 3))
-        if confidence < self.settings.min_signal_confidence:
+        min_conf = float(r.get("min_signal_confidence", self.settings.min_signal_confidence))
+        if confidence < min_conf:
             return TradeSignal(
                 "HOLD",
                 confidence,
@@ -55,9 +57,11 @@ class TrendScalperStrategy:
                 metadata=self._metadata(row),
             )
 
-        min_stop_distance = self.settings.min_stop_points * point
-        sl_distance = max(atr * self.settings.sl_atr_multiplier, min_stop_distance)
-        tp_distance = max(atr * self.settings.tp_atr_multiplier, min_stop_distance)
+        min_stop_distance = int(r.get("min_stop_points", self.settings.min_stop_points)) * point
+        sl_mult = float(r.get("sl_atr_multiplier", self.settings.sl_atr_multiplier))
+        tp_mult = float(r.get("tp_atr_multiplier", self.settings.tp_atr_multiplier))
+        sl_distance = max(atr * sl_mult, min_stop_distance)
+        tp_distance = max(atr * tp_mult, min_stop_distance)
 
         return TradeSignal(
             action,

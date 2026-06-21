@@ -28,6 +28,12 @@ class RuntimeSettingsStore:
             "magic_number", "deviation_points", "one_trade_per_bar",
             "bars_to_send", "request_timeout_ms", "request_retries", "retry_delay_ms",
             "settings_refresh_seconds",
+            "symbol", "timeframe", "bars", "poll_seconds",
+            "ema_fast", "ema_slow", "ema_trend", "atr_period", "rsi_period",
+            "sl_atr_multiplier", "tp_atr_multiplier", "min_stop_points",
+            "min_signal_confidence", "llm_min_score", "llm_timeout_seconds",
+            "risk_percent", "daily_loss_limit_percent", "max_trades_per_day",
+            "fixed_lot", "order_comment",
         }
         return {key: value for key, value in raw.items() if key in valid_keys}
 
@@ -73,6 +79,93 @@ class RuntimeSettingsStore:
 
         if "llm_fail_closed" in payload:
             current["llm_fail_closed"] = _coerce_bool(payload["llm_fail_closed"])
+
+        if "symbol" in payload:
+            current["symbol"] = str(payload["symbol"]).upper()
+
+        if "timeframe" in payload:
+            current["timeframe"] = str(payload["timeframe"]).upper()
+
+        if "bars" in payload:
+            val = int(payload["bars"])
+            if val < 50:
+                raise ValueError("bars must be >= 50")
+            current["bars"] = val
+
+        if "poll_seconds" in payload:
+            val = int(payload["poll_seconds"])
+            if val < 5:
+                raise ValueError("poll_seconds must be >= 5")
+            current["poll_seconds"] = val
+
+        if "ema_fast" in payload:
+            current["ema_fast"] = int(payload["ema_fast"])
+
+        if "ema_slow" in payload:
+            current["ema_slow"] = int(payload["ema_slow"])
+
+        if "ema_trend" in payload:
+            current["ema_trend"] = int(payload["ema_trend"])
+
+        if "atr_period" in payload:
+            current["atr_period"] = int(payload["atr_period"])
+
+        if "rsi_period" in payload:
+            current["rsi_period"] = int(payload["rsi_period"])
+
+        if "sl_atr_multiplier" in payload:
+            current["sl_atr_multiplier"] = float(payload["sl_atr_multiplier"])
+
+        if "tp_atr_multiplier" in payload:
+            current["tp_atr_multiplier"] = float(payload["tp_atr_multiplier"])
+
+        if "min_stop_points" in payload:
+            current["min_stop_points"] = int(payload["min_stop_points"])
+
+        if "min_signal_confidence" in payload:
+            val = float(payload["min_signal_confidence"])
+            if val < 0 or val > 1:
+                raise ValueError("min_signal_confidence must be between 0 and 1")
+            current["min_signal_confidence"] = val
+
+        if "llm_min_score" in payload:
+            val = float(payload["llm_min_score"])
+            if val < 0 or val > 1:
+                raise ValueError("llm_min_score must be between 0 and 1")
+            current["llm_min_score"] = val
+
+        if "llm_timeout_seconds" in payload:
+            val = int(payload["llm_timeout_seconds"])
+            if val < 1:
+                raise ValueError("llm_timeout_seconds must be >= 1")
+            current["llm_timeout_seconds"] = val
+
+        if "risk_percent" in payload:
+            val = float(payload["risk_percent"])
+            if val <= 0 or val > 5:
+                raise ValueError("risk_percent must be > 0 and <= 5")
+            current["risk_percent"] = val
+
+        if "daily_loss_limit_percent" in payload:
+            val = float(payload["daily_loss_limit_percent"])
+            if val < 0:
+                raise ValueError("daily_loss_limit_percent must be >= 0")
+            current["daily_loss_limit_percent"] = val
+
+        if "max_trades_per_day" in payload:
+            val = int(payload["max_trades_per_day"])
+            if val < 1:
+                raise ValueError("max_trades_per_day must be >= 1")
+            current["max_trades_per_day"] = val
+
+        if "fixed_lot" in payload:
+            val = float(payload["fixed_lot"])
+            if val <= 0:
+                raise ValueError("fixed_lot must be > 0")
+            current["fixed_lot"] = val
+
+        if "order_comment" in payload:
+            current["order_comment"] = str(payload["order_comment"])[:50]
 
         if "lots" in payload:
             lots = float(payload["lots"])
@@ -226,19 +319,29 @@ class EventStore:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def _detect_active_symbol(self) -> str:
+        """Detect the actual trading symbol from recent events."""
+        events = self.recent(20)
+        symbols = [e.get("symbol", "") for e in events if e.get("symbol")]
+        if symbols:
+            from collections import Counter
+            return Counter(symbols).most_common(1)[0][0]
+        return self.settings.symbol
+
     def status(self) -> dict[str, Any]:
         effective = self.runtime_settings.effective() if self.runtime_settings else {
             "trading_mode": self.settings.trading_mode,
             "dry_run": self.settings.dry_run,
             "use_llm": self.settings.use_llm,
         }
+        active_symbol = self._detect_active_symbol()
         return {
             "ok": True,
             "server_time": datetime.now(timezone.utc).isoformat(),
             "settings": {
                 "trading_mode": effective["trading_mode"],
                 "dry_run": effective["dry_run"],
-                "symbol": self.settings.symbol,
+                "symbol": active_symbol,
                 "timeframe": self.settings.timeframe,
                 "bars": self.settings.bars,
                 "poll_seconds": self.settings.poll_seconds,
