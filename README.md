@@ -61,12 +61,14 @@ By default `DASHBOARD_AUTO_TOKEN=true`, so the local dashboard auto-fills the AP
 
 The dashboard can edit runtime values for:
 
-- `Mode`
-- `Dry Run`
-- `LLM`
-- `LLM Fail Closed`
+- Core controls: `Mode`, `Dry Run`, `LLM`, `LLM Fail Closed`
+- Strategy controls: symbol, timeframe, bars, EMA/ATR/RSI, stop/target multipliers, confidence
+- Risk controls: risk %, daily loss %, max trades/day, LLM score/timeout
+- MT5 EA controls: sizing mode, lots/max-lots, max positions, spread caps, cooldown, magic, deviation, one-trade-per-bar
 
-These dashboard edits are saved to `data/dashboard_settings.json`. They affect the Docker signal service immediately. `LLM Fail Closed=true` blocks trades when DeepSeek times out; `false` lets deterministic signals continue if DeepSeek is unavailable. MT5 execution still depends on the EA input `DryRun`, so keep the EA dry-run enabled until you are ready on demo.
+These dashboard edits are saved to `data/dashboard_settings.json`. They affect the Docker signal service immediately, including strategy/risk/LLM analysis parameters. The MT5 EA refreshes execution settings from `/api/runtime-settings`, so dashboard changes apply after the EA refresh interval. In `fixed lots` sizing, `Lots / Max Lots` is the exact order volume. In `risk %` sizing, `Risk %` calculates volume from account equity and stop-loss distance, while `Lots / Max Lots` acts as the maximum cap. If the broker minimum/step rounds the result, small risk changes may still normalize to the same lot. `LLM Fail Closed=true` blocks trades when DeepSeek times out; `false` lets deterministic signals continue if DeepSeek is unavailable. Keep dry-run enabled until you are ready on demo.
+
+When `LLM=true`, the dashboard switches to LLM Expert Autopilot: Asset, Live Control, Strategy, and MT5 EA panels are hidden. The only visible user controls are `Risk %`, `Daily Loss %`, `Max Trades/Day`, `LLM Min Score`, and `LLM Timeout`. The backend uses those five values as the authority, then auto-tunes timeframe, bars, EMA/ATR/RSI, stops, confidence, spread limits, cooldown, risk sizing, max positions, and request timeout. `Daily Loss %` and `Max Trades/Day` are always user-controlled and are never overwritten by autopilot. Set `LLM=false` via settings/API/config to return to manual advanced controls.
 
 If needed, edit `.env`:
 
@@ -114,6 +116,10 @@ Only after demo testing, change the EA input:
 ```text
 DryRun=false
 ```
+
+### MT5 Strategy Tester
+
+MT5 blocks `WebRequest` inside Strategy Tester, which produces error `4014`. The EA now detects tester mode when `UseLocalBacktest=true` and runs the same EMA/ATR/RSI trend logic locally instead of calling the Docker signal service. Dashboard/LLM runtime updates are live-trading features; tester runs use the EA input defaults for strategy/risk parameters.
 
 ## DeepSeek Setup
 

@@ -48,25 +48,28 @@ class SignalEngine:
         positions_count = int(payload.get("positions_count", 0))
 
         runtime = self.runtime_settings.effective()
+        magic_number = int(runtime.get("magic_number", self.settings.magic_number))
         allowed, risk_reason = self.risk.can_trade(account, runtime)
         if not allowed:
-            return self._hold(risk_reason)
+            return self._hold(risk_reason, runtime=runtime)
 
-        max_spread = self.settings.max_spread_points
+        max_spread = float(runtime.get("max_spread_points", self.settings.max_spread_points))
         if max_spread > 0 and spread_points > max_spread:
             return self._hold(
-                f"Spread blocked trade: {spread_points:.1f} > {max_spread:.1f}"
+                f"Spread blocked trade: {spread_points:.1f} > {max_spread:.1f}",
+                runtime=runtime,
             )
 
-        max_pos = self.settings.max_positions
+        max_pos = int(runtime.get("max_positions", self.settings.max_positions))
         if positions_count >= max_pos:
             return self._hold(
-                f"Position cap blocked trade: {positions_count} >= {max_pos}"
+                f"Position cap blocked trade: {positions_count} >= {max_pos}",
+                runtime=runtime,
             )
 
         signal = self._analyze_with_runtime(rates, point, runtime)
         if not signal.is_trade:
-            return self._hold(signal.reason, signal.confidence)
+            return self._hold(signal.reason, signal.confidence, runtime=runtime)
 
         # Use runtime LLM min score override if available, else .env default
         llm_min_score = runtime.get("llm_min_score", self.settings.llm_min_score)
@@ -81,9 +84,10 @@ class SignalEngine:
                 symbol=str(payload.get("symbol", self.settings.symbol)),
                 timeframe=str(payload.get("timeframe", self.settings.timeframe)),
                 fail_closed=bool(runtime["llm_fail_closed"]),
+                runtime=runtime,
             )
             if not decision.approved or decision.score < llm_min_score:
-                return self._hold(f"DeepSeek blocked: {decision.reason}", decision.score)
+                return self._hold(f"DeepSeek blocked: {decision.reason}", decision.score, runtime=runtime)
 
         sl_points = max(1, int(math.ceil(signal.sl_distance / point)))
         tp_points = max(1, int(math.ceil(signal.tp_distance / point)))
@@ -95,7 +99,7 @@ class SignalEngine:
             "tp_distance": signal.tp_distance,
             "sl_points": sl_points,
             "tp_points": tp_points,
-            "magic": self.settings.magic_number,
+            "magic": magic_number,
             "metadata": signal.metadata,
         }
 
@@ -148,7 +152,13 @@ class SignalEngine:
         """Run strategy analysis using runtime dashboard overrides."""
         return self.strategy.analyze(rates, point, runtime)
 
-    def _hold(self, reason: str, confidence: float = 0.0) -> dict[str, Any]:
+    def _hold(
+        self,
+        reason: str,
+        confidence: float = 0.0,
+        runtime: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        effective = runtime or {}
         return {
             "action": "HOLD",
             "confidence": confidence,
@@ -157,7 +167,7 @@ class SignalEngine:
             "tp_distance": 0.0,
             "sl_points": 0,
             "tp_points": 0,
-            "magic": self.settings.magic_number,
+            "magic": int(effective.get("magic_number", self.settings.magic_number)),
             "metadata": {},
         }
 
@@ -274,6 +284,7 @@ class SignalHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -282,6 +293,7 @@ class SignalHandler(BaseHTTPRequestHandler):
         body = html.encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -427,6 +439,15 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 .pill:hover{border-color:var(--accent)}
 .pill.active{background:var(--accent)22;color:var(--accent);border-color:var(--accent)44}
 .tabs{display:flex;gap:6px;margin-bottom:14px}
+.hero{background:radial-gradient(circle at top left,#6366f133,transparent 32%),linear-gradient(135deg,#111827,#0f172a);border-color:#334155}
+.hero h2{font-size:17px}
+.autopilot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
+.metric{background:#02061766;border:1px solid #334155;border-radius:12px;padding:12px}
+.metric .k{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+.metric .v{font-size:18px;font-weight:700;margin-top:4px}
+.soft-note{font-size:12px;color:#cbd5e1;line-height:1.5}
+.advanced-hidden{display:none!important}
+.mode-chip{font-size:11px;border-radius:99px;padding:4px 10px;border:1px solid #818cf866;color:#c4b5fd;background:#6366f122}
 .hidden{display:none!important}
 .toast{position:fixed;bottom:20px;right:20px;background:var(--green);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:99;animation:fadeIn .3s,fadeOut .3s 1.7s forwards}
 @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -436,7 +457,11 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 <body>
 <header>
 <h1>⚡ <span>Trend Scalper AI</span></h1>
-<div id="topBar" class="row-center" style="gap:14px;font-size:12px;color:var(--muted)">Loading...</div>
+<div class="row-center" style="gap:10px">
+  <input id="tokenInput" type="password" placeholder="Signal token" style="width:150px">
+  <button onclick="saveToken()" class="btn-outline">Token</button>
+  <div id="topBar" class="row-center" style="gap:14px;font-size:12px;color:var(--muted)">Loading...</div>
+</div>
 </header>
 <main>
 
@@ -444,7 +469,7 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 <section class="grid3" id="statCards"></section>
 
 <!-- Asset Selector + Presets -->
-<section class="panel">
+<section class="panel" id="assetPanel">
   <h2>🎯 Smart Asset Selector</h2>
   <div class="row" style="gap:10px;flex-wrap:wrap">
     <label class="field">
@@ -467,7 +492,7 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 </section>
 
 <!-- Live Control Panel -->
-<section class="panel">
+<section class="panel" id="corePanel">
   <div class="row-spread">
     <h2>🎛 Live Control <span id="eaBadge" class="badge badge-live">LIVE</span></h2>
     <div class="row" style="gap:8px">
@@ -480,8 +505,19 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
   </div>
 </section>
 
+<!-- AI Autopilot -->
+<section class="panel hero hidden" id="aiAutopilotPanel">
+  <div class="row-spread">
+    <h2>🧠 LLM Expert Autopilot <span id="autoProfile" class="mode-chip">manual</span></h2>
+    <span class="soft-note">You control only Risk % · Daily Loss % · Max Trades/Day · LLM Min Score · LLM Timeout.</span>
+  </div>
+  <div class="autopilot-grid" id="autoTuneCards"></div>
+  <div class="divider"></div>
+  <div id="autoTuneSummary" class="soft-note">Enable LLM to activate automatic expert tuning.</div>
+</section>
+
 <!-- Strategy Parameters -->
-<section class="panel">
+<section class="panel" id="strategyPanel">
   <h2>📊 Strategy</h2>
   <div class="row" style="flex-wrap:wrap;gap:10px">
     <label class="field"><span class="label">Timeframe</span><select id="cfgTf"><option>M1</option><option>M5</option><option>M15</option><option>H1</option><option>H4</option><option>D1</option></select></label>
@@ -500,12 +536,13 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 </section>
 
 <!-- EA Execution -->
-<section class="panel">
+<section class="panel" id="eaPanel">
   <h2>🤖 MT5 EA</h2>
   <div class="row" style="flex-wrap:wrap;gap:10px">
     <label class="field"><span class="label">Max Spread %</span><input id="cfgSpreadPct" type="number" step="0.1" min="0" max="100" value="0" style="width:80px"></label>
     <label class="field"><span class="label">Spread Pts</span><input id="cfgSpreadPts" type="number" min="0" value="0" style="width:80px"></label>
-    <label class="field"><span class="label">Lots</span><input id="cfgLots" type="number" step="0.01" min="0.01" max="100" value="0.01" style="width:80px"></label>
+    <label class="field"><span class="label">Sizing</span><select id="cfgRiskSizing"><option value="false">fixed lots</option><option value="true">risk %</option></select></label>
+    <label class="field"><span class="label">Lots / Max Lots</span><input id="cfgLots" type="number" step="0.01" min="0.01" max="100" value="0.01" style="width:80px"></label>
     <label class="field"><span class="label">Max Positions</span><input id="cfgMaxPos" type="number" min="1" max="100" value="1" style="width:80px"></label>
     <label class="field"><span class="label">Cooldown</span><input id="cfgCooldown" type="number" min="0" value="180" style="width:80px"></label>
     <label class="field"><span class="label">Magic</span><input id="cfgMagic" type="number" value="260618" style="width:90px"></label>
@@ -516,7 +553,7 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 </section>
 
 <!-- Risk + LLM -->
-<section class="panel">
+<section class="panel" id="riskPanel">
   <h2>🛡 Risk & 🤖 LLM</h2>
   <div class="row" style="flex-wrap:wrap;gap:10px">
     <label class="field"><span class="label">Risk %</span><input id="cfgRiskPct" type="number" step="0.01" min="0.01" max="5" value="0.25" style="width:80px"></label>
@@ -544,11 +581,46 @@ window.SIGTOKEN=__AUTO_SIGNAL_TOKEN__;
 const tokenInput=document.getElementById('tokenInput')||null;
 let symTimeout=null;
 let currentPreset=null;
-const h=()=>{const t=localStorage.getItem('signalToken')||window.SIGTOKEN||'';return t?{Authorization:`Bearer ${t}`}:{}};
-async function G(p){const r=await fetch(p,{headers:h()});if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}
-async function P(p,d){const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json',...h()},body:JSON.stringify(d)});if(!r.ok)throw new Error(r.status+' '+ (await r.text()));return r.json()}
+function authToken(){return window.SIGTOKEN||localStorage.getItem('signalToken')||''}
+const h=()=>{const t=authToken();return t?{Authorization:`Bearer ${t}`}:{}}; 
+async function requestJson(p,opts={},retried=false){
+  const r=await fetch(p,{...opts,headers:{...(opts.headers||{}),...h()}});
+  if(r.status===401&&!retried&&window.SIGTOKEN&&localStorage.getItem('signalToken')){
+    localStorage.removeItem('signalToken');
+    if(tokenInput)tokenInput.value='';
+    return requestJson(p,opts,true);
+  }
+  if(!r.ok)throw new Error(r.status+' '+(await r.text()));
+  return r.json();
+}
+async function G(p){return requestJson(p)}
+async function P(p,d){return requestJson(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})}
 function B(v){return v?'true':'false'}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast';setTimeout(()=>t.className='hidden',2200)}
+function showError(action,e){console.error(action,e);toast('❌ '+action+': '+String(e.message||e).slice(0,140))}
+function saveToken(){
+  const value=(tokenInput&&tokenInput.value.trim())||'';
+  if(value)localStorage.setItem('signalToken',value);else localStorage.removeItem('signalToken');
+  toast(value?'Token saved':'Token cleared');
+  refresh();
+}
+const coreFieldIds=['cfgMode','cfgDry','cfgLlm','cfgFail'];
+const strategyFieldIds=['symInput','cfgTf','cfgBars','cfgEmaF','cfgEmaS','cfgEmaT','cfgAtr','cfgRsi','cfgSlAtr','cfgTpAtr','cfgMinStop','cfgMinConf','cfgLlmScore','cfgLlmTimeout','cfgRiskPct','cfgDailyLoss','cfgMaxTrades'];
+const eaFieldIds=['cfgDry','cfgRiskSizing','cfgSpreadPct','cfgSpreadPts','cfgLots','cfgMaxPos','cfgCooldown','cfgMagic','cfgDev','cfgOneBar'];
+const riskLlmFieldIds=['cfgRiskPct','cfgDailyLoss','cfgMaxTrades','cfgLlmScore','cfgLlmTimeout'];
+let autoSaveTimer=null;
+const dirtyFields=new Set();
+function markDirty(ids){ids.forEach(id=>dirtyFields.add(id))}
+function markSaved(ids){ids.forEach(id=>dirtyFields.delete(id))}
+function setValue(id,value){
+  const el=document.getElementById(id);
+  if(!el||document.activeElement===el||dirtyFields.has(id))return;
+  el.value=value==null?'':String(value);
+}
+document.addEventListener('input',e=>{if(e.target&&e.target.id)dirtyFields.add(e.target.id)});
+document.addEventListener('change',e=>{if(e.target&&e.target.id)dirtyFields.add(e.target.id)});
+document.addEventListener('input',e=>{if(e.target&&riskLlmFieldIds.includes(e.target.id))scheduleAutoTuneSave()});
+document.addEventListener('change',e=>{if(e.target&&riskLlmFieldIds.includes(e.target.id))scheduleAutoTuneSave()});
 
 let gPresets={};
 let gDetectedType='other';
@@ -611,91 +683,158 @@ function applyPresets(){
   document.getElementById('cfgLlmScore').value=p.llm_min_score||0.65;
   document.getElementById('cfgRiskPct').value=p.risk_percent||0.25;
   document.getElementById('cfgCooldown').value=p.cooldown||180;
+  markDirty(['cfgSpreadPct','cfgEmaF','cfgEmaS','cfgEmaT','cfgAtr','cfgRsi','cfgSlAtr','cfgTpAtr','cfgMinConf','cfgLlmScore','cfgRiskPct','cfgCooldown']);
   toast('✅ Presets applied! Click Save buttons to persist.');
 }
 
-async function saveCoreSettings(){
-  await P('/api/settings',{
-    trading_mode:document.getElementById('cfgMode').value,
-    dry_run:document.getElementById('cfgDry').value==='true',
-    use_llm:document.getElementById('cfgLlm').value==='true',
-    llm_fail_closed:document.getElementById('cfgFail').value==='true'});
-  await refresh();toast('Core settings saved')
-}
+function llmEnabled(){return document.getElementById('cfgLlm').value==='true'}
 
-async function saveStrategy(){
-  const p={
-    symbol:document.getElementById('symInput').value.trim().toUpperCase(),
-    timeframe:document.getElementById('cfgTf').value,
-    bars:parseInt(document.getElementById('cfgBars').value),
-    ema_fast:parseInt(document.getElementById('cfgEmaF').value),
-    ema_slow:parseInt(document.getElementById('cfgEmaS').value),
-    ema_trend:parseInt(document.getElementById('cfgEmaT').value),
-    atr_period:parseInt(document.getElementById('cfgAtr').value),
-    rsi_period:parseInt(document.getElementById('cfgRsi').value),
-    sl_atr_multiplier:parseFloat(document.getElementById('cfgSlAtr').value),
-    tp_atr_multiplier:parseFloat(document.getElementById('cfgTpAtr').value),
-    min_stop_points:parseInt(document.getElementById('cfgMinStop').value),
-    min_signal_confidence:parseFloat(document.getElementById('cfgMinConf').value),
-    llm_min_score:parseFloat(document.getElementById('cfgLlmScore').value),
+function riskLlmPayload(){
+  return {
+    auto_tune:llmEnabled(),
+    use_llm:llmEnabled(),
     risk_percent:parseFloat(document.getElementById('cfgRiskPct').value),
     daily_loss_limit_percent:parseFloat(document.getElementById('cfgDailyLoss').value),
     max_trades_per_day:parseInt(document.getElementById('cfgMaxTrades').value),
-    llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value)};
-  await P('/api/settings',p);await refresh();toast('Strategy saved')
+    llm_min_score:parseFloat(document.getElementById('cfgLlmScore').value),
+    llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value)
+  };
+}
+
+function scheduleAutoTuneSave(){
+  if(!llmEnabled())return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer=setTimeout(()=>saveRiskLlmSettings(true),900);
+}
+
+async function saveRiskLlmSettings(silent=false){
+  try{
+    const result=await P('/api/settings',riskLlmPayload());
+    markSaved(riskLlmFieldIds);
+    await refresh();
+    if(!silent)toast('LLM autopilot saved')
+    return result;
+  }catch(e){showError('LLM autopilot save failed',e)}
+}
+
+async function saveCoreSettings(){
+  try{
+    const useLlm=document.getElementById('cfgLlm').value==='true';
+    await P('/api/settings',{
+      trading_mode:document.getElementById('cfgMode').value,
+      dry_run:document.getElementById('cfgDry').value==='true',
+      use_llm:useLlm,
+      auto_tune:useLlm,
+      llm_fail_closed:document.getElementById('cfgFail').value==='true'});
+    markSaved(coreFieldIds);
+    await refresh();toast('Core settings saved')
+  }catch(e){showError('Core save failed',e)}
+}
+
+async function saveStrategy(){
+  if(llmEnabled())return saveRiskLlmSettings(false);
+  try{
+    const p={
+      symbol:document.getElementById('symInput').value.trim().toUpperCase(),
+      timeframe:document.getElementById('cfgTf').value,
+      bars:parseInt(document.getElementById('cfgBars').value),
+      ema_fast:parseInt(document.getElementById('cfgEmaF').value),
+      ema_slow:parseInt(document.getElementById('cfgEmaS').value),
+      ema_trend:parseInt(document.getElementById('cfgEmaT').value),
+      atr_period:parseInt(document.getElementById('cfgAtr').value),
+      rsi_period:parseInt(document.getElementById('cfgRsi').value),
+      sl_atr_multiplier:parseFloat(document.getElementById('cfgSlAtr').value),
+      tp_atr_multiplier:parseFloat(document.getElementById('cfgTpAtr').value),
+      min_stop_points:parseInt(document.getElementById('cfgMinStop').value),
+      min_signal_confidence:parseFloat(document.getElementById('cfgMinConf').value),
+      llm_min_score:parseFloat(document.getElementById('cfgLlmScore').value),
+      risk_percent:parseFloat(document.getElementById('cfgRiskPct').value),
+      daily_loss_limit_percent:parseFloat(document.getElementById('cfgDailyLoss').value),
+      max_trades_per_day:parseInt(document.getElementById('cfgMaxTrades').value),
+      llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value)};
+    await P('/api/settings',p);markSaved(strategyFieldIds);await refresh();toast('Strategy saved')
+  }catch(e){showError('Strategy save failed',e)}
 }
 
 async function saveEaSettings(){
-  await P('/api/settings',{
-    dry_run:document.getElementById('cfgDry').value==='true',
-    lots:parseFloat(document.getElementById('cfgLots').value),
-    max_positions:parseInt(document.getElementById('cfgMaxPos').value),
-    max_spread_points:parseInt(document.getElementById('cfgSpreadPts').value),
-    max_spread_percent:parseFloat(document.getElementById('cfgSpreadPct').value),
-    cooldown_seconds:parseInt(document.getElementById('cfgCooldown').value),
-    magic_number:parseInt(document.getElementById('cfgMagic').value),
-    deviation_points:parseInt(document.getElementById('cfgDev').value),
-    one_trade_per_bar:document.getElementById('cfgOneBar').value==='true'});
-  await refresh();toast('EA settings saved')
+  try{
+    await P('/api/settings',{
+      dry_run:document.getElementById('cfgDry').value==='true',
+      use_risk_sizing:document.getElementById('cfgRiskSizing').value==='true',
+      lots:parseFloat(document.getElementById('cfgLots').value),
+      max_positions:parseInt(document.getElementById('cfgMaxPos').value),
+      max_spread_points:parseInt(document.getElementById('cfgSpreadPts').value),
+      max_spread_percent:parseFloat(document.getElementById('cfgSpreadPct').value),
+      cooldown_seconds:parseInt(document.getElementById('cfgCooldown').value),
+      magic_number:parseInt(document.getElementById('cfgMagic').value),
+      deviation_points:parseInt(document.getElementById('cfgDev').value),
+      one_trade_per_bar:document.getElementById('cfgOneBar').value==='true'});
+    markSaved(eaFieldIds);
+    await refresh();toast('EA settings saved')
+  }catch(e){showError('EA save failed',e)}
+}
+
+function updateDashboardMode(s,runtime){
+  const autopilot=!!s.use_llm;
+  document.getElementById('aiAutopilotPanel').classList.toggle('hidden',!autopilot);
+  document.getElementById('assetPanel').classList.toggle('advanced-hidden',autopilot);
+  document.getElementById('corePanel').classList.toggle('advanced-hidden',autopilot);
+  document.getElementById('strategyPanel').classList.toggle('advanced-hidden',autopilot);
+  document.getElementById('eaPanel').classList.toggle('advanced-hidden',autopilot);
+  document.getElementById('autoProfile').textContent=s.auto_tune_profile||'manual';
+  document.getElementById('autoTuneSummary').textContent=s.auto_tune_summary||(
+    autopilot?'LLM autopilot is tuning Strategy and MT5 EA parameters from your risk controls.':'Enable LLM to activate automatic expert tuning.'
+  );
+  document.getElementById('autoTuneCards').innerHTML=[
+    ['Strategy',`${s.timeframe||'?'} · EMA ${s.ema_fast||'?'} / ${s.ema_slow||'?'} / ${s.ema_trend||'?'}`],
+    ['Signal Gate',`Confidence ≥ ${Number(s.min_signal_confidence||0).toFixed(2)} · LLM ≥ ${Number(s.llm_min_score||0).toFixed(2)}`],
+    ['Stops',`SL x${s.sl_atr_multiplier||'?'} · TP x${s.tp_atr_multiplier||'?'} · min ${s.min_stop_points||'?'} pts`],
+    ['Execution',`${runtime.use_risk_sizing?'risk % sizing':'fixed lots'} · cap ${runtime.lots||'?'} lot · max pos ${runtime.max_positions||'?'}`],
+    ['Protection',`spread ≤ ${runtime.max_spread_percent??'?'}% · cooldown ${runtime.cooldown_seconds||'?'}s`],
+    ['Daily Risk',`risk ${s.risk_percent||'?'}% · loss ${s.daily_loss_limit_percent||'?'}% · trades ${s.max_trades_per_day||'?'}`]
+  ].map(([k,v])=>`<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 }
 
 async function refresh(){
   try{
+    if(tokenInput)tokenInput.value=localStorage.getItem('signalToken')||'';
     const status=await G('/api/status');
     const runtime=await G('/api/runtime-settings');
     const eventsR=await G('/api/events?limit=80');
     const s=status.settings||{},sum=status.summary||{},risk=status.risk_state||{},events=eventsR.events||[];
 
     // Populate forms
-    document.getElementById('symInput').value=s.symbol||'SOLUSD';
-    document.getElementById('cfgMode').value=s.trading_mode||'live';
-    document.getElementById('cfgDry').value=B(s.dry_run);
-    document.getElementById('cfgLlm').value=B(s.use_llm);
-    document.getElementById('cfgFail').value=B(s.llm_fail_closed);
-    document.getElementById('cfgTf').value=s.timeframe||'M1';
-    document.getElementById('cfgBars').value=s.bars||300;
-    document.getElementById('cfgEmaF').value=s.ema_fast||8;
-    document.getElementById('cfgEmaS').value=s.ema_slow||21;
-    document.getElementById('cfgEmaT').value=s.ema_trend||55;
-    document.getElementById('cfgAtr').value=s.atr_period||14;
-    document.getElementById('cfgRsi').value=s.rsi_period||14;
-    document.getElementById('cfgSlAtr').value=s.sl_atr_multiplier||1.3;
-    document.getElementById('cfgTpAtr').value=s.tp_atr_multiplier||1.8;
-    document.getElementById('cfgMinStop').value=s.min_stop_points||80;
-    document.getElementById('cfgMinConf').value=s.min_signal_confidence||0.62;
-    document.getElementById('cfgLlmScore').value=s.llm_min_score||0.65;
-    document.getElementById('cfgLlmTimeout').value=s.llm_timeout_seconds||8;
-    document.getElementById('cfgRiskPct').value=s.risk_percent||0.25;
-    document.getElementById('cfgDailyLoss').value=s.daily_loss_limit_percent||2.0;
-    document.getElementById('cfgMaxTrades').value=s.max_trades_per_day||8;
-    document.getElementById('cfgSpreadPct').value=runtime.max_spread_percent!=null?runtime.max_spread_percent:0;
-    document.getElementById('cfgSpreadPts').value=runtime.max_spread_points||0;
-    document.getElementById('cfgLots').value=runtime.lots||0.01;
-    document.getElementById('cfgMaxPos').value=runtime.max_positions||1;
-    document.getElementById('cfgCooldown').value=runtime.cooldown_seconds||180;
-    document.getElementById('cfgMagic').value=runtime.magic_number||260618;
-    document.getElementById('cfgDev').value=runtime.deviation_points||20;
-    document.getElementById('cfgOneBar').value=B(runtime.one_trade_per_bar);
+    setValue('symInput',s.symbol||'SOLUSD');
+    setValue('cfgMode',s.trading_mode||'live');
+    setValue('cfgDry',B(s.dry_run));
+    setValue('cfgLlm',B(s.use_llm));
+    setValue('cfgFail',B(s.llm_fail_closed));
+    setValue('cfgTf',s.timeframe||'M1');
+    setValue('cfgBars',s.bars||300);
+    setValue('cfgEmaF',s.ema_fast||8);
+    setValue('cfgEmaS',s.ema_slow||21);
+    setValue('cfgEmaT',s.ema_trend||55);
+    setValue('cfgAtr',s.atr_period||14);
+    setValue('cfgRsi',s.rsi_period||14);
+    setValue('cfgSlAtr',s.sl_atr_multiplier||1.3);
+    setValue('cfgTpAtr',s.tp_atr_multiplier||1.8);
+    setValue('cfgMinStop',s.min_stop_points||80);
+    setValue('cfgMinConf',s.min_signal_confidence||0.62);
+    setValue('cfgLlmScore',s.llm_min_score||0.65);
+    setValue('cfgLlmTimeout',s.llm_timeout_seconds||8);
+    setValue('cfgRiskPct',s.risk_percent||0.25);
+    setValue('cfgDailyLoss',s.daily_loss_limit_percent||2.0);
+    setValue('cfgMaxTrades',s.max_trades_per_day||8);
+    setValue('cfgSpreadPct',runtime.max_spread_percent!=null?runtime.max_spread_percent:0);
+    setValue('cfgSpreadPts',runtime.max_spread_points||0);
+    setValue('cfgRiskSizing',B(runtime.use_risk_sizing));
+    setValue('cfgLots',runtime.lots||0.01);
+    setValue('cfgMaxPos',runtime.max_positions||1);
+    setValue('cfgCooldown',runtime.cooldown_seconds||180);
+    setValue('cfgMagic',runtime.magic_number||260618);
+    setValue('cfgDev',runtime.deviation_points||20);
+    setValue('cfgOneBar',B(runtime.one_trade_per_bar));
+    updateDashboardMode(s,runtime);
 
     // Top bar
     document.getElementById('topBar').innerHTML=`
@@ -736,7 +875,10 @@ async function refresh(){
       <td>${r.confidence!=null?r.confidence.toFixed(3):''}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.reason||''}">${r.reason||''}</td>
     </tr>`).join(''):'<tr><td colspan="6" class="muted">No events yet</td></tr>';
-  }catch(e){console.error('refresh failed',e)}
+  }catch(e){
+    console.error('refresh failed',e);
+    document.getElementById('topBar').innerHTML=`<span class="dot dot-offline"></span><span class="error">API error: ${String(e.message||e).slice(0,120)}</span>`;
+  }
 }
 
 onSymbolChange();

@@ -87,6 +87,85 @@ class SignalEngineTests(unittest.TestCase):
         self.assertEqual(result["action"], "BUY")
         self.assertGreater(result["sl_points"], 0)
 
+    def test_engine_uses_saved_runtime_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {}, clear=True):
+                settings = replace(
+                    load_settings(None),
+                    max_spread_points=1,
+                    magic_number=111,
+                    state_path=Path(directory) / "state.json",
+                    event_log_path=Path(directory) / "events.jsonl",
+                    dashboard_settings_path=Path(directory) / "dashboard_settings.json",
+                    cooldown_seconds=0,
+                )
+            engine = SignalEngine(settings)
+            engine.runtime_settings.update(
+                {
+                    "symbol": "BTCUSD",
+                    "use_risk_sizing": True,
+                    "max_spread_points": 0,
+                    "max_positions": 10,
+                    "magic_number": 999,
+                }
+            )
+            payload = _payload(_uptrend_rates())
+            payload["symbol"] = "BTCUSD"
+            payload["point"] = 0.01
+            payload["spread_points"] = 2500
+            result = engine.evaluate(payload)
+            status = engine.events.status()
+
+        self.assertEqual(result["action"], "BUY")
+        self.assertEqual(result["magic"], 999)
+        self.assertEqual(status["settings"]["symbol"], "BTCUSD")
+        self.assertTrue(status["settings"]["use_risk_sizing"])
+        self.assertEqual(status["settings"]["max_spread_points"], 0)
+        self.assertEqual(status["settings"]["max_positions"], 10)
+
+    def test_llm_autopilot_tunes_strategy_and_ea_from_risk(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {}, clear=True):
+                settings = replace(
+                    load_settings(None),
+                    deepseek_api_key="test-key",
+                    state_path=Path(directory) / "state.json",
+                    event_log_path=Path(directory) / "events.jsonl",
+                    dashboard_settings_path=Path(directory) / "dashboard_settings.json",
+                    cooldown_seconds=0,
+                )
+            engine = SignalEngine(settings)
+            effective = engine.runtime_settings.update(
+                {
+                    "use_llm": True,
+                    "symbol": "BTCUSD",
+                    "risk_percent": 0.15,
+                    "daily_loss_limit_percent": 0.3,
+                    "max_trades_per_day": 2,
+                    "llm_min_score": 0.8,
+                    "llm_timeout_seconds": 14,
+                }
+            )
+            status = engine.events.status()
+
+        self.assertTrue(effective["auto_tune"])
+        self.assertEqual(effective["auto_tune_profile"], "crypto-low")
+        self.assertEqual(effective["timeframe"], "M5")
+        self.assertEqual(effective["bars"], 400)
+        self.assertEqual(effective["ema_fast"], 5)
+        self.assertEqual(effective["ema_slow"], 13)
+        self.assertEqual(effective["ema_trend"], 34)
+        self.assertEqual(effective["max_spread_percent"], 3.0)
+        self.assertTrue(effective["use_risk_sizing"])
+        self.assertEqual(effective["lots"], 0.06)
+        self.assertEqual(effective["max_positions"], 1)
+        self.assertEqual(effective["daily_loss_limit_percent"], 0.3)
+        self.assertEqual(effective["max_trades_per_day"], 2)
+        self.assertGreater(effective["min_signal_confidence"], 0.7)
+        self.assertGreater(effective["cooldown_seconds"], 700)
+        self.assertIn("LLM autopilot", status["settings"]["auto_tune_summary"])
+        self.assertIn("user daily loss 0.30%, max trades 2", status["settings"]["auto_tune_summary"])
+
 
 class DeepSeekRiskFilterTests(unittest.TestCase):
     def test_prompt_marks_zero_spread_cap_as_disabled(self) -> None:
@@ -208,10 +287,37 @@ class SignalHttpE2ETests(unittest.TestCase):
                         "dry_run": False,
                         "use_llm": False,
                         "llm_fail_closed": False,
+                        "symbol": "BTCUSD",
+                        "timeframe": "M5",
+                        "bars": 360,
+                        "ema_fast": 5,
+                        "ema_slow": 13,
+                        "ema_trend": 34,
+                        "atr_period": 10,
+                        "rsi_period": 11,
+                        "sl_atr_multiplier": 1.7,
+                        "tp_atr_multiplier": 2.4,
+                        "min_stop_points": 120,
+                        "min_signal_confidence": 0.58,
+                        "risk_percent": 0.4,
+                        "daily_loss_limit_percent": 3.5,
+                        "max_trades_per_day": 12,
+                        "llm_min_score": 0.6,
+                        "llm_timeout_seconds": 12,
+                        "use_risk_sizing": True,
+                        "max_spread_points": 0,
+                        "max_spread_percent": 1.5,
+                        "lots": 0.2,
+                        "max_positions": 7,
+                        "cooldown_seconds": 240,
+                        "magic_number": 123456,
+                        "deviation_points": 30,
+                        "one_trade_per_bar": False,
                     },
                     token=token,
                 )
                 updated_status = _get_json(f"http://127.0.0.1:{port}/api/status", token=token)
+                runtime_settings = _get_json(f"http://127.0.0.1:{port}/api/runtime-settings", token=token)
                 with self.assertRaises(urllib.error.HTTPError):
                     _get_json(f"http://127.0.0.1:{port}/api/status", token="")
             finally:
@@ -227,16 +333,71 @@ class SignalHttpE2ETests(unittest.TestCase):
         self.assertTrue(status["ok"])
         self.assertGreaterEqual(status["summary"]["events_count"], 1)
         self.assertEqual(events["events"][0]["action"], "BUY")
-        self.assertIn("Trend Scalper Monitor", dashboard)
-        self.assertIn('window.__SIGNAL_TOKEN__ = "test-token"', dashboard)
-        self.assertIn("Edit Agent Runtime", dashboard)
-        self.assertIn("LLM Fail Closed", dashboard)
+        self.assertIn("Trend Scalper AI", dashboard)
+        self.assertIn('window.SIGTOKEN="test-token"', dashboard)
+        self.assertIn('id="tokenInput"', dashboard)
+        self.assertIn("requestJson", dashboard)
+        self.assertIn("Live Control", dashboard)
+        self.assertIn("Fail Closed", dashboard)
+        self.assertIn("LLM Expert Autopilot", dashboard)
+        self.assertIn('id="aiAutopilotPanel"', dashboard)
+        self.assertIn('id="assetPanel"', dashboard)
+        self.assertIn('id="corePanel"', dashboard)
+        self.assertIn("You control only Risk", dashboard)
+        self.assertIn("advanced-hidden", dashboard)
+        self.assertIn("updateDashboardMode", dashboard)
+        self.assertIn(
+            "riskLlmFieldIds=['cfgRiskPct','cfgDailyLoss','cfgMaxTrades','cfgLlmScore','cfgLlmTimeout']",
+            dashboard.replace(" ", ""),
+        )
+        self.assertIn("corePanel').classList.toggle('advanced-hidden',autopilot)", dashboard)
         self.assertEqual(settings_update["settings"]["trading_mode"], "live")
         self.assertFalse(settings_update["settings"]["dry_run"])
         self.assertFalse(settings_update["settings"]["llm_fail_closed"])
+        self.assertEqual(settings_update["settings"]["symbol"], "BTCUSD")
+        self.assertEqual(settings_update["settings"]["timeframe"], "M5")
+        self.assertEqual(settings_update["settings"]["bars"], 360)
+        self.assertEqual(settings_update["settings"]["ema_fast"], 5)
+        self.assertEqual(settings_update["settings"]["atr_period"], 10)
+        self.assertEqual(settings_update["settings"]["rsi_period"], 11)
+        self.assertEqual(settings_update["settings"]["sl_atr_multiplier"], 1.7)
+        self.assertEqual(settings_update["settings"]["tp_atr_multiplier"], 2.4)
+        self.assertEqual(settings_update["settings"]["min_stop_points"], 120)
+        self.assertEqual(settings_update["settings"]["min_signal_confidence"], 0.58)
+        self.assertEqual(settings_update["settings"]["risk_percent"], 0.4)
+        self.assertEqual(settings_update["settings"]["daily_loss_limit_percent"], 3.5)
+        self.assertEqual(settings_update["settings"]["max_trades_per_day"], 12)
+        self.assertEqual(settings_update["settings"]["llm_timeout_seconds"], 12)
+        self.assertTrue(settings_update["settings"]["use_risk_sizing"])
+        self.assertEqual(settings_update["settings"]["max_spread_percent"], 1.5)
+        self.assertEqual(settings_update["settings"]["lots"], 0.2)
+        self.assertEqual(settings_update["settings"]["max_positions"], 7)
+        self.assertEqual(settings_update["settings"]["cooldown_seconds"], 240)
+        self.assertEqual(settings_update["settings"]["magic_number"], 123456)
+        self.assertEqual(settings_update["settings"]["deviation_points"], 30)
+        self.assertFalse(settings_update["settings"]["one_trade_per_bar"])
         self.assertEqual(updated_status["settings"]["trading_mode"], "live")
         self.assertFalse(updated_status["settings"]["dry_run"])
         self.assertFalse(updated_status["settings"]["llm_fail_closed"])
+        self.assertEqual(updated_status["settings"]["symbol"], "BTCUSD")
+        self.assertEqual(updated_status["settings"]["timeframe"], "M5")
+        self.assertEqual(updated_status["settings"]["ema_slow"], 13)
+        self.assertEqual(updated_status["settings"]["ema_trend"], 34)
+        self.assertEqual(updated_status["settings"]["risk_percent"], 0.4)
+        self.assertEqual(updated_status["settings"]["daily_loss_limit_percent"], 3.5)
+        self.assertEqual(updated_status["settings"]["max_trades_per_day"], 12)
+        self.assertEqual(updated_status["settings"]["llm_min_score"], 0.6)
+        self.assertTrue(updated_status["settings"]["use_risk_sizing"])
+        self.assertEqual(updated_status["settings"]["max_positions"], 7)
+        self.assertTrue(runtime_settings["use_risk_sizing"])
+        self.assertEqual(runtime_settings["max_spread_points"], 0)
+        self.assertEqual(runtime_settings["max_spread_percent"], 1.5)
+        self.assertEqual(runtime_settings["lots"], 0.2)
+        self.assertEqual(runtime_settings["max_positions"], 7)
+        self.assertEqual(runtime_settings["cooldown_seconds"], 240)
+        self.assertEqual(runtime_settings["magic_number"], 123456)
+        self.assertEqual(runtime_settings["deviation_points"], 30)
+        self.assertFalse(runtime_settings["one_trade_per_bar"])
 
 
 class Mql5ExpertTests(unittest.TestCase):
@@ -248,13 +409,19 @@ class Mql5ExpertTests(unittest.TestCase):
         self.assertIn("trade.Buy", source)
         self.assertIn("trade.Sell", source)
         self.assertIn("/trade-result", source)
-        self.assertIn("if(DryRun)\n      return;", source)
+        self.assertIn("if (g_runtime.dry_run)\n      return;", source)
         self.assertIn("input int MaxSpreadPoints = 0", source)
+        self.assertIn("input bool UseRiskSizing = false", source)
+        self.assertIn("input bool UseLocalBacktest = true", source)
+        self.assertIn("MQLInfoInteger(MQL_TESTER)", source)
+        self.assertIn("AnalyzeLocalSignal", source)
         self.assertIn("input int RequestTimeoutMs = 30000", source)
         self.assertIn("input int RequestRetries = 1", source)
         self.assertIn("status == 1003", source)
         self.assertIn("error == 5203", source)
         self.assertIn("NormalizeVolume", source)
+        self.assertIn("CalculateRiskVolume", source)
+        self.assertIn("SYMBOL_TRADE_TICK_VALUE", source)
         self.assertIn("JsonValueStart", source)
         self.assertIn("IsJsonWhitespace", source)
 

@@ -4,11 +4,14 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
+from typing import Any
 
 from .config import Settings
 from .models import AccountSnapshot, LLMDecision, Rate, TradeSignal
 
 logger = logging.getLogger(__name__)
+_LLM_TIMEOUT_SECONDS: ContextVar[float | None] = ContextVar("llm_timeout_seconds", default=None)
 
 
 class DeepSeekRiskFilter:
@@ -25,62 +28,77 @@ class DeepSeekRiskFilter:
         symbol: str | None = None,
         timeframe: str | None = None,
         fail_closed: bool | None = None,
+        runtime: dict[str, Any] | None = None,
     ) -> LLMDecision:
         if not signal.is_trade:
             return LLMDecision(False, 0.0, "No trade signal to review")
 
+        effective = runtime or {}
+        max_spread_points = float(effective.get("max_spread_points", self.settings.max_spread_points))
         payload = {
-            "symbol": symbol or self.settings.symbol,
-            "timeframe": timeframe or self.settings.timeframe,
+            "symbol": symbol or str(effective.get("symbol", self.settings.symbol)),
+            "timeframe": timeframe or str(effective.get("timeframe", self.settings.timeframe)),
             "candidate_action": signal.action,
             "confidence": signal.confidence,
             "strategy_reason": signal.reason,
             "signal_metadata": signal.metadata,
             "risk": {
                 "equity": account.equity,
-                "risk_percent": self.settings.risk_percent,
-                "max_spread_points": self.settings.max_spread_points,
+                "risk_percent": float(effective.get("risk_percent", self.settings.risk_percent)),
+                "daily_loss_limit_percent": float(
+                    effective.get("daily_loss_limit_percent", self.settings.daily_loss_limit_percent)
+                ),
+                "max_trades_per_day": int(effective.get("max_trades_per_day", self.settings.max_trades_per_day)),
+                "min_signal_confidence": float(
+                    effective.get("min_signal_confidence", self.settings.min_signal_confidence)
+                ),
+                "max_spread_points": max_spread_points,
                 "max_spread_points_note": (
                     "disabled; do not reject only because spread exceeds this value"
-                    if self.settings.max_spread_points <= 0
+                    if max_spread_points <= 0
                     else "enabled"
                 ),
                 "spread_points": spread_points,
                 "open_positions": open_positions,
-                "max_positions": self.settings.max_positions,
+                "max_positions": int(effective.get("max_positions", self.settings.max_positions)),
             },
             "recent_bars": self._compact_bars(rates),
         }
 
         try:
-            response = self._chat_completion(
-                {
-                    "model": self.settings.deepseek_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a strict trading risk filter. Return only JSON. "
-                                "Approve only when the supplied trend-scalping signal is coherent, "
-                                "spread/risk are acceptable, and recent candles do not contradict it. "
-                                "If max_spread_points is 0 or lower, the deterministic spread cap is disabled; "
-                                "do not interpret it as zero allowed spread. "
-                                "Never invent missing market data."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                "Review this candidate trade and return JSON with keys: "
-                                "approved boolean, score number from 0 to 1, reason short string.\n"
-                                f"{json.dumps(payload, separators=(',', ':'))}"
-                            ),
-                        },
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "stream": False,
-                }
-            )
+            timeout_seconds = float(effective.get("llm_timeout_seconds", self.settings.llm_timeout_seconds))
+            timeout_token = _LLM_TIMEOUT_SECONDS.set(timeout_seconds)
+            try:
+                response = self._chat_completion(
+                    {
+                        "model": self.settings.deepseek_model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a strict trading risk filter. Return only JSON. "
+                                    "Approve only when the supplied trend-scalping signal is coherent, "
+                                    "spread/risk are acceptable, and recent candles do not contradict it. "
+                                    "If max_spread_points is 0 or lower, the deterministic spread cap is disabled; "
+                                    "do not interpret it as zero allowed spread. "
+                                    "Never invent missing market data."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Review this candidate trade and return JSON with keys: "
+                                    "approved boolean, score number from 0 to 1, reason short string.\n"
+                                    f"{json.dumps(payload, separators=(',', ':'))}"
+                                ),
+                            },
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "stream": False,
+                    }
+                )
+            finally:
+                _LLM_TIMEOUT_SECONDS.reset(timeout_token)
             content = response["choices"][0]["message"].get("content") or "{}"
             raw = json.loads(content)
             return LLMDecision(
@@ -90,7 +108,11 @@ class DeepSeekRiskFilter:
             )
         except Exception as exc:
             logger.warning("DeepSeek review failed: %s", exc)
-            effective_fail_closed = self.settings.llm_fail_closed if fail_closed is None else fail_closed
+            effective_fail_closed = (
+                bool(effective.get("llm_fail_closed", self.settings.llm_fail_closed))
+                if fail_closed is None
+                else fail_closed
+            )
             if effective_fail_closed:
                 return LLMDecision(False, 0.0, f"LLM unavailable: {exc}")
             return LLMDecision(True, 1.0, f"LLM bypassed after error: {exc}")
@@ -107,7 +129,8 @@ class DeepSeekRiskFilter:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.settings.llm_timeout_seconds) as response:
+            timeout_seconds = _LLM_TIMEOUT_SECONDS.get() or self.settings.llm_timeout_seconds
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             message = exc.read().decode("utf-8", errors="replace")

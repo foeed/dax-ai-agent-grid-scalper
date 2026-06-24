@@ -15,6 +15,7 @@ input ENUM_TIMEFRAMES SignalTimeframe = PERIOD_M1;
 
 // --- Runtime defaults (overridden by dashboard) ---
 input bool DryRun = true;
+input bool UseRiskSizing = false;
 input double Lots = 0.01;
 input int MaxPositions = 1;
 input int MaxSpreadPoints = 0;
@@ -24,9 +25,19 @@ input int DeviationPoints = 20;
 input bool OneTradePerBar = true;
 input int CooldownSeconds = 180;
 input int BarsToSend = 300;
+input int EmaFast = 8;
+input int EmaSlow = 21;
+input int EmaTrend = 55;
+input int AtrPeriod = 14;
+input int RsiPeriod = 14;
+input double SlAtrMultiplier = 1.3;
+input double TpAtrMultiplier = 1.8;
+input int MinStopPoints = 80;
+input double MinSignalConfidence = 0.62;
 input int RequestTimeoutMs = 30000;
 input int RequestRetries = 1;
 input int RetryDelayMs = 750;
+input bool UseLocalBacktest = true;
 
 // --- Runtime settings refresh interval (seconds) ---
 input int SettingsRefreshSeconds = 30;
@@ -34,6 +45,8 @@ input int SettingsRefreshSeconds = 30;
 // --- Runtime settings cache (fetched from dashboard) ---
 struct RuntimeConfig {
    bool dry_run;
+   bool use_risk_sizing;
+   double risk_percent;
    double lots;
    int max_positions;
    int max_spread_points;
@@ -43,6 +56,15 @@ struct RuntimeConfig {
    int deviation_points;
    bool one_trade_per_bar;
    int bars_to_send;
+   int ema_fast;
+   int ema_slow;
+   int ema_trend;
+   int atr_period;
+   int rsi_period;
+   double sl_atr_multiplier;
+   double tp_atr_multiplier;
+   int min_stop_points;
+   double min_signal_confidence;
    int request_timeout_ms;
    int request_retries;
    int retry_delay_ms;
@@ -56,14 +78,18 @@ datetime last_bar_time = 0;
 datetime last_trade_time = 0;
 datetime last_settings_fetch = 0;
 bool g_runtime_loaded = false;
+bool g_is_tester = false;
 
 int OnInit()
 {
+   g_is_tester = (bool)MQLInfoInteger(MQL_TESTER);
    trade.SetExpertMagicNumber(MagicNumber);
    trade.SetDeviationInPoints(DeviationPoints);
 
    // Set defaults from inputs (fallback if API unreachable)
    g_runtime.dry_run = DryRun;
+   g_runtime.use_risk_sizing = UseRiskSizing;
+   g_runtime.risk_percent = 0.25;
    g_runtime.lots = Lots;
    g_runtime.max_positions = MaxPositions;
    g_runtime.max_spread_points = MaxSpreadPoints;
@@ -73,22 +99,36 @@ int OnInit()
    g_runtime.deviation_points = DeviationPoints;
    g_runtime.one_trade_per_bar = OneTradePerBar;
    g_runtime.bars_to_send = BarsToSend;
+   g_runtime.ema_fast = EmaFast;
+   g_runtime.ema_slow = EmaSlow;
+   g_runtime.ema_trend = EmaTrend;
+   g_runtime.atr_period = AtrPeriod;
+   g_runtime.rsi_period = RsiPeriod;
+   g_runtime.sl_atr_multiplier = SlAtrMultiplier;
+   g_runtime.tp_atr_multiplier = TpAtrMultiplier;
+   g_runtime.min_stop_points = MinStopPoints;
+   g_runtime.min_signal_confidence = MinSignalConfidence;
    g_runtime.request_timeout_ms = RequestTimeoutMs;
    g_runtime.request_retries = RequestRetries;
    g_runtime.retry_delay_ms = RetryDelayMs;
    g_runtime.use_llm = false;
    g_runtime.llm_fail_closed = true;
 
-   // Fetch runtime settings from dashboard immediately
-   FetchRuntimeSettings();
+   // Fetch runtime settings from dashboard immediately unless Strategy Tester blocks WebRequest
+   if (!UseLocalBacktest || !g_is_tester)
+      FetchRuntimeSettings();
+   else
+      Print("Strategy Tester detected: using local backtest logic; WebRequest/dashboard calls disabled.");
    g_runtime_loaded = true;
 
    PrintFormat(
-      "TrendScalperEA v1.10 initialized. SignalUrl=%s RuntimeSettingsUrl=%s DryRun=%s Lots=%.2f MaxPos=%d RefreshEvery=%ds",
+      "TrendScalperEA v1.10 initialized. SignalUrl=%s RuntimeSettingsUrl=%s DryRun=%s Sizing=%s LotsCap=%.2f Risk=%.2f%% MaxPos=%d RefreshEvery=%ds",
       SignalUrl,
       RuntimeSettingsUrl,
       g_runtime.dry_run ? "true" : "false",
+      g_runtime.use_risk_sizing ? "risk" : "fixed",
       g_runtime.lots,
+      g_runtime.risk_percent,
       g_runtime.max_positions,
       SettingsRefreshSeconds
    );
@@ -98,8 +138,10 @@ int OnInit()
 
 void OnTick()
 {
-   // Periodically refresh runtime settings from dashboard
-   if (TimeCurrent() - last_settings_fetch >= SettingsRefreshSeconds)
+   bool local_backtest = (UseLocalBacktest && g_is_tester);
+
+   // Periodically refresh runtime settings from dashboard when WebRequest is available
+   if (!local_backtest && TimeCurrent() - last_settings_fetch >= SettingsRefreshSeconds)
    {
       FetchRuntimeSettings();
       last_settings_fetch = TimeCurrent();
@@ -160,20 +202,37 @@ void OnTick()
       return;
    }
 
-   string request_body = BuildSignalRequest(rates, copied, spread, positions_count);
+   string action = "";
+   string reason = "";
+   double confidence = 0.0;
+   int sl_points = 0;
+   int tp_points = 0;
    string response = "";
-   int status = PostJson(SignalUrl, request_body, response);
-   if (status < 200 || status >= 300)
-   {
-      PrintFormat("Signal service HTTP status=%d response=%s", status, response);
-      return;
-   }
 
-   string action = JsonString(response, "action");
-   string reason = JsonString(response, "reason");
-   double confidence = JsonDouble(response, "confidence", 0.0);
-   int sl_points = (int)JsonDouble(response, "sl_points", 0.0);
-   int tp_points = (int)JsonDouble(response, "tp_points", 0.0);
+   if (local_backtest)
+   {
+      if (!AnalyzeLocalSignal(rates, copied, action, reason, confidence, sl_points, tp_points))
+      {
+         PrintFormat("Local signal action=%s confidence=%.3f reason=%s", action, confidence, reason);
+         return;
+      }
+   }
+   else
+   {
+      string request_body = BuildSignalRequest(rates, copied, spread, positions_count);
+      int status = PostJson(SignalUrl, request_body, response);
+      if (status < 200 || status >= 300)
+      {
+         PrintFormat("Signal service HTTP status=%d response=%s", status, response);
+         return;
+      }
+
+      action = JsonString(response, "action");
+      reason = JsonString(response, "reason");
+      confidence = JsonDouble(response, "confidence", 0.0);
+      sl_points = (int)JsonDouble(response, "sl_points", 0.0);
+      tp_points = (int)JsonDouble(response, "tp_points", 0.0);
+   }
 
    PrintFormat("Signal action=%s confidence=%.3f reason=%s", action, confidence, reason);
 
@@ -198,7 +257,8 @@ void OnTick()
    if (success)
       last_trade_time = TimeCurrent();
 
-   NotifyTradeResult(action, success, reason);
+   if (!local_backtest)
+      NotifyTradeResult(action, success, reason);
 }
 
 //+------------------------------------------------------------------+
@@ -217,6 +277,8 @@ void FetchRuntimeSettings()
 
    // Parse each field from the JSON response; keep input defaults on parse failure
    g_runtime.dry_run = JsonBool(response, "dry_run", g_runtime.dry_run);
+   g_runtime.use_risk_sizing = JsonBool(response, "use_risk_sizing", g_runtime.use_risk_sizing);
+   g_runtime.risk_percent = JsonDouble(response, "risk_percent", g_runtime.risk_percent);
    g_runtime.lots = JsonDouble(response, "lots", g_runtime.lots);
    g_runtime.max_positions = (int)JsonDouble(response, "max_positions", g_runtime.max_positions);
    g_runtime.max_spread_points = (int)JsonDouble(response, "max_spread_points", g_runtime.max_spread_points);
@@ -226,6 +288,15 @@ void FetchRuntimeSettings()
    g_runtime.deviation_points = (int)JsonDouble(response, "deviation_points", g_runtime.deviation_points);
    g_runtime.one_trade_per_bar = JsonBool(response, "one_trade_per_bar", g_runtime.one_trade_per_bar);
    g_runtime.bars_to_send = (int)JsonDouble(response, "bars_to_send", g_runtime.bars_to_send);
+   g_runtime.ema_fast = (int)JsonDouble(response, "ema_fast", g_runtime.ema_fast);
+   g_runtime.ema_slow = (int)JsonDouble(response, "ema_slow", g_runtime.ema_slow);
+   g_runtime.ema_trend = (int)JsonDouble(response, "ema_trend", g_runtime.ema_trend);
+   g_runtime.atr_period = (int)JsonDouble(response, "atr_period", g_runtime.atr_period);
+   g_runtime.rsi_period = (int)JsonDouble(response, "rsi_period", g_runtime.rsi_period);
+   g_runtime.sl_atr_multiplier = JsonDouble(response, "sl_atr_multiplier", g_runtime.sl_atr_multiplier);
+   g_runtime.tp_atr_multiplier = JsonDouble(response, "tp_atr_multiplier", g_runtime.tp_atr_multiplier);
+   g_runtime.min_stop_points = (int)JsonDouble(response, "min_stop_points", g_runtime.min_stop_points);
+   g_runtime.min_signal_confidence = JsonDouble(response, "min_signal_confidence", g_runtime.min_signal_confidence);
    g_runtime.request_timeout_ms = (int)JsonDouble(response, "request_timeout_ms", g_runtime.request_timeout_ms);
    g_runtime.request_retries = (int)JsonDouble(response, "request_retries", g_runtime.request_retries);
    g_runtime.retry_delay_ms = (int)JsonDouble(response, "retry_delay_ms", g_runtime.retry_delay_ms);
@@ -233,8 +304,10 @@ void FetchRuntimeSettings()
    g_runtime.llm_fail_closed = JsonBool(response, "llm_fail_closed", g_runtime.llm_fail_closed);
 
    PrintFormat(
-      "Runtime settings refreshed: dry_run=%s lots=%.2f max_pos=%d max_spread=%d max_spread_pct=%.2f%% cooldown=%d magic=%d dev=%d one_bar=%s bars=%d timeout=%d retries=%d use_llm=%s",
+      "Runtime settings refreshed: dry_run=%s sizing=%s risk=%.2f%% lots_cap=%.2f max_pos=%d max_spread=%d max_spread_pct=%.2f%% cooldown=%d magic=%d dev=%d one_bar=%s bars=%d timeout=%d retries=%d use_llm=%s",
       g_runtime.dry_run ? "true" : "false",
+      g_runtime.use_risk_sizing ? "risk" : "fixed",
+      g_runtime.risk_percent,
       g_runtime.lots,
       g_runtime.max_positions,
       g_runtime.max_spread_points,
@@ -291,7 +364,6 @@ int GetJson(string url, string &response)
 
       if (retryable && attempt < max_attempts)
       {
-         PrintFormat("WebRequest GET attempt %d/%d failed; retrying. %s", attempt, max_attempts, details);
          Sleep(MathMax(0, g_runtime.retry_delay_ms));
          continue;
       }
@@ -345,7 +417,8 @@ bool ExecuteSignal(string action, int sl_points, int tp_points)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double volume = NormalizeVolume(g_runtime.lots);
+   double volume_cap = NormalizeVolume(g_runtime.lots);
+   double volume = g_runtime.use_risk_sizing ? CalculateRiskVolume(sl_points, volume_cap) : volume_cap;
    bool is_buy = (action == "BUY");
    double price = is_buy ? ask : bid;
    double sl = is_buy ? price - sl_points * _Point : price + sl_points * _Point;
@@ -356,8 +429,15 @@ bool ExecuteSignal(string action, int sl_points, int tp_points)
 
    if (g_runtime.dry_run)
    {
-      PrintFormat("DRY_RUN would execute %s %.2f %s sl=%s tp=%s",
-                  action, volume, _Symbol, DoubleToString(sl, _Digits), DoubleToString(tp, _Digits));
+      PrintFormat("DRY_RUN would execute %s %.2f %s sizing=%s risk=%.2f%% lots_cap=%.2f sl=%s tp=%s",
+                  action,
+                  volume,
+                  _Symbol,
+                  g_runtime.use_risk_sizing ? "risk" : "fixed",
+                  g_runtime.risk_percent,
+                  volume_cap,
+                  DoubleToString(sl, _Digits),
+                  DoubleToString(tp, _Digits));
       return false;
    }
 
@@ -374,6 +454,266 @@ bool ExecuteSignal(string action, int sl_points, int tp_points)
                trade.ResultComment());
 
    return sent && trade.ResultDeal() > 0;
+}
+
+bool AnalyzeLocalSignal(MqlRates &rates[], int copied, string &action, string &reason, double &confidence, int &sl_points, int &tp_points)
+{
+   action = "HOLD";
+   reason = "";
+   confidence = 0.0;
+   sl_points = 0;
+   tp_points = 0;
+
+   int min_bars = MathMax(g_runtime.ema_trend, MathMax(g_runtime.atr_period, g_runtime.rsi_period)) + 20;
+   if (copied < min_bars)
+   {
+      reason = "Not enough bars for local tester strategy";
+      return false;
+   }
+
+   int n = copied;
+   double opens[], highs[], lows[], closes[];
+   ArrayResize(opens, n);
+   ArrayResize(highs, n);
+   ArrayResize(lows, n);
+   ArrayResize(closes, n);
+
+   for (int j = 0; j < n; j++)
+   {
+      int src = n - 1 - j; // CopyRates buffer is newest first; convert to oldest first
+      opens[j] = rates[src].open;
+      highs[j] = rates[src].high;
+      lows[j] = rates[src].low;
+      closes[j] = rates[src].close;
+   }
+
+   int row = n - 2;      // last completed candle
+   int previous = n - 3; // candle before completed candle
+   if (previous < MathMax(g_runtime.atr_period, g_runtime.rsi_period) || row < 5)
+   {
+      reason = "Not enough clean indicator data";
+      return false;
+   }
+
+   double ema_fast[], ema_slow[], ema_trend[], atr[], rsi[];
+   ArrayResize(ema_fast, n);
+   ArrayResize(ema_slow, n);
+   ArrayResize(ema_trend, n);
+   ArrayResize(atr, n);
+   ArrayResize(rsi, n);
+
+   BuildEma(closes, n, g_runtime.ema_fast, ema_fast);
+   BuildEma(closes, n, g_runtime.ema_slow, ema_slow);
+   BuildEma(closes, n, g_runtime.ema_trend, ema_trend);
+   BuildAtr(highs, lows, closes, n, g_runtime.atr_period, atr);
+   BuildRsi(closes, n, g_runtime.rsi_period, rsi);
+
+   if (atr[row] <= 0.0 || rsi[row] < 0.0)
+   {
+      reason = "Local ATR/RSI not usable";
+      return false;
+   }
+
+   double ema_slow_slope = ema_slow[row] - ema_slow[row - 5];
+   double momentum = closes[row] - closes[row - 3];
+   double buy_score = 0.0;
+   double sell_score = 0.0;
+   string buy_reason = "";
+   string sell_reason = "";
+
+   if (ema_fast[row] > ema_slow[row] && ema_slow[row] > ema_trend[row])
+   {
+      buy_score += 1.4;
+      buy_reason += "EMA stack bullish, ";
+   }
+   if (closes[row] > ema_fast[row])
+   {
+      buy_score += 0.8;
+      buy_reason += "price above fast EMA, ";
+   }
+   if (ema_slow_slope > 0.0)
+   {
+      buy_score += 0.9;
+      buy_reason += "trend slope rising, ";
+   }
+   if (rsi[row] >= 48.0 && rsi[row] <= 68.0)
+   {
+      buy_score += 0.8;
+      buy_reason += "RSI supports momentum, ";
+   }
+   if (momentum > 0.0)
+   {
+      buy_score += 0.6;
+      buy_reason += "short momentum positive, ";
+   }
+   if (closes[row] > opens[row] && closes[previous] > opens[previous])
+   {
+      buy_score += 0.5;
+      buy_reason += "recent candles bullish, ";
+   }
+
+   if (ema_fast[row] < ema_slow[row] && ema_slow[row] < ema_trend[row])
+   {
+      sell_score += 1.4;
+      sell_reason += "EMA stack bearish, ";
+   }
+   if (closes[row] < ema_fast[row])
+   {
+      sell_score += 0.8;
+      sell_reason += "price below fast EMA, ";
+   }
+   if (ema_slow_slope < 0.0)
+   {
+      sell_score += 0.9;
+      sell_reason += "trend slope falling, ";
+   }
+   if (rsi[row] >= 32.0 && rsi[row] <= 52.0)
+   {
+      sell_score += 0.8;
+      sell_reason += "RSI supports downside, ";
+   }
+   if (momentum < 0.0)
+   {
+      sell_score += 0.6;
+      sell_reason += "short momentum negative, ";
+   }
+   if (closes[row] < opens[row] && closes[previous] < opens[previous])
+   {
+      sell_score += 0.5;
+      sell_reason += "recent candles bearish, ";
+   }
+
+   double score = 0.0;
+   if (buy_score > sell_score)
+   {
+      action = "BUY";
+      score = buy_score;
+      reason = TrimTrailingComma(buy_reason);
+   }
+   else if (sell_score > buy_score)
+   {
+      action = "SELL";
+      score = sell_score;
+      reason = TrimTrailingComma(sell_reason);
+   }
+   else
+   {
+      reason = "No directional edge";
+      return false;
+   }
+
+   confidence = MathMin(0.95, NormalizeDouble(score / 5.0, 3));
+   if (confidence < g_runtime.min_signal_confidence)
+   {
+      reason = "Signal below threshold: " + reason;
+      return false;
+   }
+
+   double min_stop_distance = g_runtime.min_stop_points * _Point;
+   double sl_distance = MathMax(atr[row] * g_runtime.sl_atr_multiplier, min_stop_distance);
+   double tp_distance = MathMax(atr[row] * g_runtime.tp_atr_multiplier, min_stop_distance);
+   sl_points = MathMax(1, (int)MathCeil(sl_distance / _Point));
+   tp_points = MathMax(1, (int)MathCeil(tp_distance / _Point));
+   return true;
+}
+
+void BuildEma(double &values[], int count, int period, double &output[])
+{
+   double alpha = 2.0 / (period + 1.0);
+   double current = values[0];
+   for (int i = 0; i < count; i++)
+   {
+      current = (values[i] * alpha) + (current * (1.0 - alpha));
+      output[i] = current;
+   }
+}
+
+void BuildAtr(double &highs[], double &lows[], double &closes[], int count, int period, double &output[])
+{
+   double true_ranges[];
+   ArrayResize(true_ranges, count);
+   for (int i = 0; i < count; i++)
+   {
+      double previous_close = (i > 0) ? closes[i - 1] : closes[i];
+      true_ranges[i] = MathMax(highs[i] - lows[i], MathMax(MathAbs(highs[i] - previous_close), MathAbs(lows[i] - previous_close)));
+   }
+   BuildWilders(true_ranges, count, period, output);
+}
+
+void BuildRsi(double &closes[], int count, int period, double &output[])
+{
+   double gains[], losses[], average_gains[], average_losses[];
+   ArrayResize(gains, count);
+   ArrayResize(losses, count);
+   ArrayResize(average_gains, count);
+   ArrayResize(average_losses, count);
+   gains[0] = 0.0;
+   losses[0] = 0.0;
+   for (int i = 1; i < count; i++)
+   {
+      double delta = closes[i] - closes[i - 1];
+      gains[i] = MathMax(delta, 0.0);
+      losses[i] = MathMax(-delta, 0.0);
+   }
+   BuildWilders(gains, count, period, average_gains);
+   BuildWilders(losses, count, period, average_losses);
+   for (int i = 0; i < count; i++)
+   {
+      if (i < period)
+         output[i] = -1.0;
+      else if (average_losses[i] == 0.0)
+         output[i] = 100.0;
+      else
+      {
+         double relative_strength = average_gains[i] / average_losses[i];
+         output[i] = 100.0 - (100.0 / (1.0 + relative_strength));
+      }
+   }
+}
+
+void BuildWilders(double &values[], int count, int period, double &output[])
+{
+   double alpha = 1.0 / period;
+   double current = values[0];
+   for (int i = 0; i < count; i++)
+   {
+      current = (values[i] * alpha) + (current * (1.0 - alpha));
+      output[i] = current;
+   }
+}
+
+string TrimTrailingComma(string value)
+{
+   while (StringLen(value) > 0)
+   {
+      int last = StringGetCharacter(value, StringLen(value) - 1);
+      if (last != ' ' && last != ',')
+         break;
+      value = StringSubstr(value, 0, StringLen(value) - 1);
+   }
+   return value;
+}
+
+double CalculateRiskVolume(int sl_points, double volume_cap)
+{
+   if (g_runtime.risk_percent <= 0.0 || sl_points <= 0)
+      return volume_cap;
+
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double risk_amount = equity * (g_runtime.risk_percent / 100.0);
+   double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double sl_distance = sl_points * _Point;
+
+   if (equity <= 0.0 || risk_amount <= 0.0 || tick_size <= 0.0 || tick_value <= 0.0 || sl_distance <= 0.0)
+      return volume_cap;
+
+   double loss_per_lot = (sl_distance / tick_size) * tick_value;
+   if (loss_per_lot <= 0.0)
+      return volume_cap;
+
+   double requested = risk_amount / loss_per_lot;
+   return NormalizeVolume(MathMin(requested, volume_cap));
 }
 
 double NormalizeVolume(double requested)
@@ -464,7 +804,6 @@ int PostJson(string url, string body, string &response)
 
       if (retryable && attempt < max_attempts)
       {
-         PrintFormat("WebRequest attempt %d/%d failed; retrying. %s", attempt, max_attempts, details);
          Sleep(MathMax(0, g_runtime.retry_delay_ms));
          continue;
       }

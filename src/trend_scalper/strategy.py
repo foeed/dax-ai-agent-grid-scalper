@@ -11,7 +11,8 @@ class TrendScalperStrategy:
 
     def analyze(self, rates: list[Rate], point: float, runtime: dict | None = None) -> TradeSignal:
         r = runtime or {}
-        if len(rates) < self.settings.bars // 2:
+        bars = int(r.get("bars", self.settings.bars))
+        if len(rates) < bars // 2:
             return TradeSignal("HOLD", 0.0, "Not enough bars")
 
         data = add_indicators(
