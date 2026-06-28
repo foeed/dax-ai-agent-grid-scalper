@@ -29,6 +29,8 @@ class PullbackScalperStrategy:
     def __init__(self, settings=None) -> None:
         self._last_exit_bar: int = -999
         self._bars_since_exit: int = 999
+        self._consecutive_same_dir: int = 0
+        self._last_direction: str = ""
 
     def analyze(
         self,
@@ -51,6 +53,13 @@ class PullbackScalperStrategy:
             self._bars_since_exit = total_bars - self._last_exit_bar if self._last_exit_bar >= 0 else 999
         if self._bars_since_exit < min_bar_gap:
             return EntrySignal.no_trade(f"Entry gap: {self._bars_since_exit} bars < {min_bar_gap} minimum")
+
+        # ── Consecutive same-direction limit (prevent overtrading a single trend) ──
+        max_same_dir = int(r.get("max_same_direction_trades", 2))
+        if self._consecutive_same_dir >= max_same_dir:
+            return EntrySignal.no_trade(
+                f"Same-direction limit: {self._consecutive_same_dir} >= {max_same_dir}")
+
 
         # ── Prepare entry timeframe data ──
         e_data = self._prepare(entry_rates, ema_f, ema_s, ema_t, atr_p, rsi_p)
@@ -309,9 +318,20 @@ class PullbackScalperStrategy:
             },
         )
 
-    def on_exit(self) -> None:
-        """Call after a trade exits to track bar gap."""
+    def on_entry(self, direction: str) -> None:
+        """Call after a trade enters to track consecutive same-direction count."""
+        if direction == self._last_direction:
+            self._consecutive_same_dir += 1
+        else:
+            self._consecutive_same_dir = 1
+            self._last_direction = direction
+
+    def on_exit(self, was_loss: bool = False) -> None:
+        """Call after a trade exits. If loss, reset same-direction counter."""
         self._last_exit_bar = self._bars_since_exit if hasattr(self, '_current_bar') else -1
+        if was_loss:
+            self._consecutive_same_dir = 0
+            self._last_direction = ""
 
     # ── helpers ──
 

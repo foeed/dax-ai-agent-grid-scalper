@@ -87,7 +87,8 @@ def _run_single(args) -> int:
         "min_signal_confidence": 0.45,
         "min_risk_reward": 1.5,
         "min_trend_strength": 0.45,
-        "min_entry_bar_gap": 3,
+        "min_entry_bar_gap": 6,
+        "max_same_direction_trades": 2,
         "max_positions": 1,
         "max_trades_per_day": 100000,
         "cooldown_seconds": 0,
@@ -102,7 +103,8 @@ def _run_single(args) -> int:
         "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
         "atr_period": 14, "rsi_period": 14,
         "min_trend_strength": 0.25,
-        "min_entry_bar_gap": 3,
+        "min_entry_bar_gap": 6,
+        "max_same_direction_trades": 2,
     }
 
     account = AccountSnapshot(balance=equity, equity=equity)

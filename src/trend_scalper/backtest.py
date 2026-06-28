@@ -197,6 +197,7 @@ class BacktestEngine:
         self._active_trade = trade
         self._active_signal = signal
         self.exit_mgr.register_trade(self._trade_counter, signal)
+        self.strategy.on_entry(signal.action)
         self.risk.record_trade(AccountSnapshot(balance=self._equity, equity=self._equity), success=True)
 
     def _check_exit(self, m1_rates: list[Rate], m5_rates: list[Rate] | None,
@@ -279,6 +280,7 @@ class BacktestEngine:
         self._trades.append(trade)
         self.exit_mgr.remove_trade(self._trade_counter)
         self._last_exit_bar_index = self._current_bar_index
+        self.strategy.on_exit(was_loss=net_pnl < 0)
         self._active_trade = None
         self._active_signal = None
 
