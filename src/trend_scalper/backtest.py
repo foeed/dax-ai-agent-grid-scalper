@@ -73,10 +73,6 @@ class BacktestEngine:
         self._trade_counter = 0
         self._last_exit_bar_index = -999
         self._current_bar_index = 0
-        self._signals_evaluated = 0
-        self._signals_traded = 0
-        self._signals_blocked_risk = 0
-        self._signals_blocked_rr = 0
         self._equity: float = 0.0
         self._peak_equity: float = 0.0
         self._starting_equity: float = 0.0
@@ -125,19 +121,21 @@ class BacktestEngine:
 
             # Check exits for active trade
             if self._active_trade is not None and self._active_signal is not None:
-                self._check_exit(rates_m1[:i + 1], rates_m5[-300:] if rates_m5 and len(rates_m5) >= 65 else None,
-                                 bar_time, close, high, low)
+                trend_exit = rates_m5[:i // 4 + 1] if rates_m5 and len(rates_m5) >= 65 else None
+                self._check_exit(rates_m1[:i + 1], trend_exit, bar_time, close, high, low)
 
             # Check for new entries
             if self._active_trade is None:
-                # Enforce bar gap since last exit
                 min_gap = int(rt.get("min_entry_bar_gap", 3))
                 if self._current_bar_index - self._last_exit_bar_index < min_gap:
                     continue
                 entry_m1 = rates_m1[max(0, i - 300):i + 1]
-                # Trend data: pass last 300 bars for EMA warmup (work for any TF)
+                # Time-aligned trend data: only bars that have occurred up to current time
                 if rates_m5 and len(rates_m5) >= 65:
-                    entry_m5 = rates_m5[-300:] if len(rates_m5) >= 300 else rates_m5
+                    trend_end = i // 4 + 1  # M15:H1 = 4:1 ratio
+                    trend_end = min(trend_end, len(rates_m5))
+                    trend_start = max(0, trend_end - 300)
+                    entry_m5 = rates_m5[trend_start:trend_end]
                 else:
                     entry_m5 = None
 
@@ -149,7 +147,7 @@ class BacktestEngine:
                 if not allowed:
                     continue
 
-                signal = self.strategy.analyze(entry_m1, entry_m5, self._point_value, rt)
+                signal = self.strategy.analyze(entry_m1, entry_m5, self._point_value, rt, current_bar_index=i)
                 if not signal.is_trade:
                     continue
 
@@ -280,7 +278,7 @@ class BacktestEngine:
         self._trades.append(trade)
         self.exit_mgr.remove_trade(self._trade_counter)
         self._last_exit_bar_index = self._current_bar_index
-        self.strategy.on_exit(was_loss=net_pnl < 0)
+        self.strategy.on_exit(bar_index=self._current_bar_index, was_loss=net_pnl < 0)
         self._active_trade = None
         self._active_signal = None
 

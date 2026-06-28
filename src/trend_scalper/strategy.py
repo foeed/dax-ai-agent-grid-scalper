@@ -27,8 +27,7 @@ class PullbackScalperStrategy:
     _MAX_SCORE = _W_TREND + _W_PULLBACK + _W_RSI + _W_MOMENTUM  # 5.0
 
     def __init__(self, settings=None) -> None:
-        self._last_exit_bar: int = -999
-        self._bars_since_exit: int = 999
+        self._last_exit_bar_abs: int = -999
         self._consecutive_same_dir: int = 0
         self._last_direction: str = ""
 
@@ -38,6 +37,7 @@ class PullbackScalperStrategy:
         trend_rates: list[Rate] | None,
         point: float,
         runtime: dict | None = None,
+        current_bar_index: int = 0,
     ) -> EntrySignal:
         r = runtime or {}
         ema_f = int(r.get("ema_fast", 8))
@@ -46,13 +46,11 @@ class PullbackScalperStrategy:
         atr_p = int(r.get("atr_period", 14))
         rsi_p = int(r.get("rsi_period", 14))
 
-        # ── Minimum bar gap between exits and entries ──
+        # ── Minimum bar gap between exits and entries (absolute index) ──
         min_bar_gap = int(r.get("min_entry_bar_gap", 3))
-        total_bars = len(entry_rates)
-        if total_bars > 0:
-            self._bars_since_exit = total_bars - self._last_exit_bar if self._last_exit_bar >= 0 else 999
-        if self._bars_since_exit < min_bar_gap:
-            return EntrySignal.no_trade(f"Entry gap: {self._bars_since_exit} bars < {min_bar_gap} minimum")
+        if current_bar_index - self._last_exit_bar_abs < min_bar_gap:
+            return EntrySignal.no_trade(
+                f"Entry gap: {current_bar_index - self._last_exit_bar_abs} < {min_bar_gap}")
 
         # ── Consecutive same-direction limit (prevent overtrading a single trend) ──
         max_same_dir = int(r.get("max_same_direction_trades", 2))
@@ -319,16 +317,14 @@ class PullbackScalperStrategy:
         )
 
     def on_entry(self, direction: str) -> None:
-        """Call after a trade enters to track consecutive same-direction count."""
         if direction == self._last_direction:
             self._consecutive_same_dir += 1
         else:
             self._consecutive_same_dir = 1
             self._last_direction = direction
 
-    def on_exit(self, was_loss: bool = False) -> None:
-        """Call after a trade exits. If loss, reset same-direction counter."""
-        self._last_exit_bar = self._bars_since_exit if hasattr(self, '_current_bar') else -1
+    def on_exit(self, bar_index: int = 0, was_loss: bool = False) -> None:
+        self._last_exit_bar_abs = bar_index
         if was_loss:
             self._consecutive_same_dir = 0
             self._last_direction = ""
