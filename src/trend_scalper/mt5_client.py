@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,6 +27,10 @@ TIMEFRAMES: dict[str, str] = {
     "M15": "TIMEFRAME_M15",
     "M30": "TIMEFRAME_M30",
     "H1": "TIMEFRAME_H1",
+    "H4": "TIMEFRAME_H4",
+    "D1": "TIMEFRAME_D1",
+    "W1": "TIMEFRAME_W1",
+    "MN1": "TIMEFRAME_MN1",
 }
 
 
@@ -112,7 +117,8 @@ class Mt5Client:
         info = self._symbol_info()
         if tick is None:
             return math.inf
-        return abs(float(tick.ask) - float(tick.bid)) / float(info.point)
+        point_val = float(getattr(info, "point", 0.0)) or 0.00001
+        return abs(float(tick.ask) - float(tick.bid)) / point_val
 
     def point(self) -> float:
         return float(self._symbol_info().point)
@@ -145,6 +151,13 @@ class Mt5Client:
             code, message = mt5.last_error()
             return OrderResult(False, f"MT5 tick unavailable [{code}]: {message}")
 
+        stops_level = int(getattr(info, "trade_stops_level", 0) or 0)
+        point_size = float(info.point)
+        sl_price_distance = signal.sl_distance
+        sl_points = int(math.ceil(sl_price_distance / point_size))
+        if sl_points < stops_level:
+            return OrderResult(False, f"SL distance {sl_points} pts below broker minimum {stops_level} pts")
+
         is_buy = signal.action == "BUY"
         order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
         price = float(tick.ask if is_buy else tick.bid)
@@ -167,26 +180,73 @@ class Mt5Client:
             "type_filling": self._filling_mode(info),
         }
 
-        check = mt5.order_check(request)
-        if check is None:
-            code, message = mt5.last_error()
-            return OrderResult(False, f"MT5 order_check failed [{code}]: {message}")
-        if check.retcode != mt5.TRADE_RETCODE_DONE:
-            return OrderResult(False, f"MT5 order_check rejected retcode={check.retcode}: {check.comment}")
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            check = mt5.order_check(request)
+            if check is None:
+                code, message = mt5.last_error()
+                return OrderResult(False, f"MT5 order_check failed [{code}]: {message}")
+            if check.retcode != mt5.TRADE_RETCODE_DONE:
+                return OrderResult(False, f"MT5 order_check rejected retcode={check.retcode}: {check.comment}")
 
-        result = mt5.order_send(request)
-        if result is None:
-            code, message = mt5.last_error()
-            return OrderResult(False, f"MT5 order_send failed [{code}]: {message}")
+            result = mt5.order_send(request)
+            if result is None:
+                code, message = mt5.last_error()
+                return OrderResult(False, f"MT5 order_send failed [{code}]: {message}")
 
-        success_codes = {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL}
-        success = result.retcode in success_codes
-        return OrderResult(
-            success=success,
-            message=f"MT5 retcode={result.retcode}: {result.comment}",
-            order_id=int(result.order) if getattr(result, "order", 0) else None,
-            retcode=int(result.retcode),
-        )
+            retcode = int(result.retcode)
+
+            if retcode == mt5.TRADE_RETCODE_DONE:
+                filled_volume = float(getattr(result, "volume", 0.0) or 0.0)
+                actual_price = float(getattr(result, "price", 0.0) or 0.0)
+                if filled_volume < volume * 0.99:
+                    logger.warning(
+                        "Partial fill: requested %.2f lots, filled %.2f lots (%.1f%%)",
+                        volume, filled_volume, (filled_volume / volume * 100) if volume > 0 else 0,
+                    )
+                slippage = abs(actual_price - price) if actual_price > 0 else 0.0
+                if slippage > 0:
+                    logger.info(
+                        "Slippage: requested %.5f, filled %.5f (%.1f pts)",
+                        price, actual_price, slippage / point_size if point_size > 0 else 0,
+                    )
+                return OrderResult(
+                    success=True,
+                    message=f"MT5 retcode={result.retcode}: {result.comment}",
+                    order_id=int(result.order) if getattr(result, "order", 0) else None,
+                    retcode=retcode,
+                )
+
+            retry_codes = {
+                mt5.TRADE_RETCODE_REQUOTE,
+                mt5.TRADE_RETCODE_CONNECTION,
+                mt5.TRADE_RETCODE_TIMEOUT,
+                mt5.TRADE_RETCODE_PRICE_CHANGED,
+                mt5.TRADE_RETCODE_PRICE_OFF,
+            }
+            if retcode in retry_codes and attempt < max_retries:
+                delay = 0.2 * attempt
+                logger.warning("Order retry %d/%d (retcode=%d): %s (waiting %.1fs)",
+                               attempt, max_retries, retcode, result.comment, delay)
+                time_module.sleep(delay)
+                tick = mt5.symbol_info_tick(self.settings.symbol)
+                if tick:
+                    price = float(tick.ask if is_buy else tick.bid)
+                    sl = price - signal.sl_distance if is_buy else price + signal.sl_distance
+                    tp = price + signal.tp_distance if is_buy else price - signal.tp_distance
+                    request["price"] = round(price, digits)
+                    request["sl"] = round(sl, digits)
+                    request["tp"] = round(tp, digits)
+                continue
+
+            return OrderResult(
+                success=False,
+                message=f"MT5 retcode={result.retcode}: {result.comment}",
+                order_id=int(result.order) if getattr(result, "order", 0) else None,
+                retcode=retcode,
+            )
+
+        return OrderResult(False, "Max retries exhausted")
 
     def _symbol_info(self) -> Any:
         info = mt5.symbol_info(self.settings.symbol)

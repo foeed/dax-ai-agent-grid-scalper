@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ class RuntimeSettingsStore:
         self.settings = settings
         self.path = settings.dashboard_settings_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
 
     def get_overrides(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -23,19 +25,21 @@ class RuntimeSettingsStore:
         except (OSError, json.JSONDecodeError):
             return {}
         valid_keys = {
-            "trading_mode", "dry_run", "use_llm", "llm_fail_closed",
-            "auto_tune", "auto_tune_profile", "auto_tune_summary",
-            "use_risk_sizing", "lots", "max_positions", "max_spread_points", "max_spread_percent", "cooldown_seconds",
-            "magic_number", "deviation_points", "one_trade_per_bar",
-            "bars_to_send", "request_timeout_ms", "request_retries", "retry_delay_ms",
-            "settings_refresh_seconds",
-            "symbol", "timeframe", "bars", "poll_seconds",
-            "ema_fast", "ema_slow", "ema_trend", "atr_period", "rsi_period",
-            "sl_atr_multiplier", "tp_atr_multiplier", "min_stop_points",
-            "min_signal_confidence", "llm_min_score", "llm_timeout_seconds",
-            "risk_percent", "daily_loss_limit_percent", "max_trades_per_day",
-            "fixed_lot", "order_comment",
-        }
+        "trading_mode", "dry_run", "use_llm", "llm_fail_closed",
+        "auto_tune", "auto_tune_profile", "auto_tune_summary",
+        "use_risk_sizing", "lots", "max_positions", "max_spread_points", "max_spread_percent", "cooldown_seconds",
+        "magic_number", "deviation_points", "one_trade_per_bar",
+        "bars_to_send", "request_timeout_ms", "request_retries", "retry_delay_ms",
+        "settings_refresh_seconds",
+        "symbol", "timeframe", "bars", "poll_seconds",
+        "ema_fast", "ema_slow", "ema_trend", "atr_period", "rsi_period",
+        "sl_atr_multiplier", "tp_atr_multiplier", "min_stop_points",
+        "min_signal_confidence", "llm_min_score", "llm_timeout_seconds",
+        "risk_percent", "daily_loss_limit_percent", "max_trades_per_day",
+        "max_session_drawdown_percent", "max_consecutive_losses",
+        "min_risk_reward", "trailing_stop_atr_multiplier", "time_stop_bars",
+        "fixed_lot", "order_comment",
+    }
         return {key: value for key, value in raw.items() if key in valid_keys}
 
     def effective(self) -> dict[str, Any]:
@@ -75,6 +79,11 @@ class RuntimeSettingsStore:
             "max_spread_points": overrides.get("max_spread_points", self.settings.max_spread_points),
             "max_spread_percent": overrides.get("max_spread_percent", 0.5),
             "cooldown_seconds": overrides.get("cooldown_seconds", self.settings.cooldown_seconds),
+            "min_risk_reward": overrides.get("min_risk_reward", 1.5),
+            "trailing_stop_atr_multiplier": overrides.get("trailing_stop_atr_multiplier", 0.6),
+            "time_stop_bars": overrides.get("time_stop_bars", 15),
+            "max_session_drawdown_percent": overrides.get("max_session_drawdown_percent", self.settings.max_session_drawdown_percent),
+            "max_consecutive_losses": overrides.get("max_consecutive_losses", self.settings.max_consecutive_losses),
             "magic_number": overrides.get("magic_number", self.settings.magic_number),
             "deviation_points": overrides.get("deviation_points", self.settings.deviation_points),
             "one_trade_per_bar": overrides.get("one_trade_per_bar", True),
@@ -276,8 +285,19 @@ class RuntimeSettingsStore:
             current.update(_expert_auto_tune(current, self.settings))
 
         current["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self.path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        self._write_settings(current)
         return self.effective()
+
+    def apply_auto_tune(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_overrides()
+        current.update(payload)
+        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._write_settings(current)
+        return self.effective()
+
+    def _write_settings(self, data: dict[str, Any]) -> None:
+        with self._lock:
+            self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 class EventStore:
@@ -297,11 +317,12 @@ class EventStore:
             file.write(json.dumps(event, separators=(",", ":"), default=str) + "\n")
 
     def append_signal(self, request: dict[str, Any], response: dict[str, Any]) -> None:
+        metadata = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
         self.append(
             "signal",
             {
                 "symbol": request.get("symbol", self.settings.symbol),
-                "timeframe": request.get("timeframe", self.settings.timeframe),
+                "timeframe": metadata.get("selected_timeframe", request.get("timeframe", self.settings.timeframe)),
                 "action": response.get("action", "HOLD"),
                 "confidence": response.get("confidence", 0.0),
                 "reason": response.get("reason", ""),
@@ -493,9 +514,13 @@ def _expert_auto_tune(current: dict[str, Any], settings: Settings) -> dict[str, 
     cooldown = max(30, int(round(float(base["cooldown_seconds"]) * cooldown_multiplier)))
     lots_cap = _lots_cap(asset, risk_percent)
     request_timeout_ms = min(90000, max(30000, (llm_timeout_seconds * 1000) + 5000))
-    max_positions = {"low": 1, "balanced": 1 if asset == "crypto" else 2, "high": 2}[risk_band]
-    if daily_loss_adjustment["limit_positions"] or max_trades_per_day <= 3:
-        max_positions = 1
+    # Respect user's dashboard override for max_positions, only compute if not set
+    if "max_positions" in current:
+        max_positions = max(1, int(float(current["max_positions"])))
+    else:
+        max_positions = {"low": 1, "balanced": 1 if asset == "crypto" else 2, "high": 2}[risk_band]
+        if daily_loss_adjustment["limit_positions"] or max_trades_per_day <= 3:
+            max_positions = 1
 
     tuned = {
         "auto_tune": True,
@@ -567,9 +592,9 @@ def _base_profile(asset: str) -> dict[str, Any]:
             "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
             "atr_period": 14, "rsi_period": 14,
             "sl_atr_multiplier": 1.3, "tp_atr_multiplier": 1.8,
-            "min_stop_points": 80, "min_signal_confidence": 0.62,
-            "llm_min_score": 0.65, "max_spread_percent": 0.15,
-            "cooldown_seconds": 180,
+            "min_stop_points": 80, "min_signal_confidence": 0.64,
+            "llm_min_score": 0.80, "max_spread_percent": 0.15,
+            "cooldown_seconds": 113,
         },
         "forex": {
             "timeframe": "M5", "bars": 300,

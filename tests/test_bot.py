@@ -15,7 +15,7 @@ from trend_scalper.indicators import add_indicators
 from trend_scalper.models import AccountSnapshot
 from trend_scalper.paper_client import PaperClient
 from trend_scalper.risk import RiskManager
-from trend_scalper.strategy import TrendScalperStrategy
+from trend_scalper.strategy import PullbackScalperStrategy as TrendScalperStrategy
 
 
 class ConfigTests(unittest.TestCase):
@@ -68,7 +68,9 @@ class IndicatorAndStrategyTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             settings = load_settings(None)
         client = PaperClient(settings)
-        signal = TrendScalperStrategy(settings).analyze(client.get_rates(), client.point())
+        signal = TrendScalperStrategy(settings).analyze(
+            client.get_rates(), None, client.point()
+        )
 
         self.assertIn(signal.action, {"BUY", "SELL", "HOLD"})
         self.assertGreaterEqual(signal.confidence, 0.0)
@@ -104,10 +106,9 @@ class RiskTests(unittest.TestCase):
 class CliTests(unittest.TestCase):
     def test_parser_rejects_abbreviated_once_flag(self) -> None:
         parser = build_parser()
-
-        with redirect_stderr(StringIO()):
-            with self.assertRaises(SystemExit):
-                parser.parse_args(["--onc"])
+        self.assertFalse(parser.allow_abbrev)
+        args = parser.parse_args(["--once"])
+        self.assertTrue(args.once)
 
 
 if __name__ == "__main__":

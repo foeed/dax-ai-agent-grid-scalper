@@ -12,11 +12,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .config import Settings, load_settings, validate_settings
-from .llm_filter import DeepSeekRiskFilter
-from .models import AccountSnapshot, Rate
+from .exit_manager import ExitManager
+from .llm_regime_brain import LLMRegimeBrain
+from .models import AccountSnapshot, EntrySignal, ExitAction, Rate, RegimeConfig, TradeSignal
 from .monitoring import EventStore, RuntimeSettingsStore
 from .risk import RiskManager
-from .strategy import TrendScalperStrategy
+from .strategy import PullbackScalperStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -31,23 +32,148 @@ class SignalEngine:
         self.settings = settings
         self.runtime_settings = runtime_settings or RuntimeSettingsStore(settings)
         self.events = event_store or EventStore(settings, self.runtime_settings)
-        self.strategy = TrendScalperStrategy(settings)
+        self.strategy = PullbackScalperStrategy()
         self.risk = RiskManager(settings)
-        self.llm: DeepSeekRiskFilter | None = None
+        self.exit_mgr = ExitManager()
+        # Async LLM regime brain — runs in background every 5-15 min
+        self._regime_brain = LLMRegimeBrain(settings, interval_seconds=getattr(settings, 'llm_regime_interval_seconds', 300))
+        self._current_regime = RegimeConfig()  # Mutable, updated by regime brain
+        self._last_market_auto_tune_update = 0.0
+        self._regime_brain_started = False
+        self._regime_update_lock = threading.Lock()
+        self._regime_update_running = False
+        self._auto_tune_lock = threading.Lock()
 
     def evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = self._evaluate(payload)
         self.events.append_signal(payload, result)
         return result
 
+    def start_regime_brain(self) -> None:
+        """Start the async LLM regime brain if not already running."""
+        if not self._regime_brain_started and self.settings.use_llm and self.settings.deepseek_api_key:
+            self._regime_brain.start()
+            self._regime_brain_started = True
+            logger.info("LLM regime brain started in background")
+
+    def stop_regime_brain(self) -> None:
+        """Stop the background regime brain."""
+        if self._regime_brain_started:
+            self._regime_brain.stop()
+            self._regime_brain_started = False
+
+    def get_regime_status(self) -> dict[str, Any]:
+        """Return current regime info for API."""
+        return self._regime_brain.status()
+
+    def update_regime_from_payload(self, payload: dict[str, Any]) -> None:
+        """Feed M15/H1 rates to the regime brain for async analysis.
+
+        Called on every signal request when multi-timeframe data is available.
+        The brain decides internally whether it's time to re-evaluate.
+        """
+        if not self._regime_brain_started:
+            return
+
+        # Extract macro timeframes from payload
+        rates_by_tf = {}
+        multi_data = (
+            payload.get("multi_timeframe_rates")
+            or payload.get("rates_by_timeframe")
+            or payload.get("timeframes")
+        )
+        if isinstance(multi_data, dict):
+            for tf in ("M15", "H1", "H4"):
+                if tf in multi_data and isinstance(multi_data[tf], list) and multi_data[tf]:
+                    rates_by_tf[tf] = self._normalize_rates(multi_data[tf])
+
+        if not rates_by_tf:
+            return
+
+        # Check if enough time has passed since last update
+        now = time_module.time()
+        last_update = self._current_regime.updated_at
+        interval = max(120, getattr(self.settings, 'llm_regime_interval_seconds', 300))
+
+        # Use a max staleness check to prevent permanent blocking if thread crashes
+        max_staleness = interval * 3
+        if last_update and now - last_update < interval:
+            if now - last_update < max_staleness:
+                return  # Not time yet
+            logger.warning("Regime update stale for %.0fs, forcing update", now - last_update)
+
+        # Prevent overlapping async updates
+        with self._regime_update_lock:
+            if self._regime_update_running:
+                return
+            self._regime_update_running = True
+
+        def _async_update():
+            try:
+                new_regime = self._regime_brain.update_regime_now(rates_by_tf)
+                self._current_regime = new_regime
+                self._persist_regime_to_dashboard(new_regime)
+                logger.info(
+                    "Regime updated: mode=%s bias=%s conf=%.2f",
+                    new_regime.strategy_mode, new_regime.trading_bias, new_regime.llm_confidence,
+                )
+            except Exception as exc:
+                logger.error("Async regime update failed: %s", exc)
+            finally:
+                self._regime_update_running = False
+
+        threading.Thread(target=_async_update, daemon=True, name="regime-update").start()
+
+    def _persist_regime_to_dashboard(self, regime: RegimeConfig) -> None:
+        """Persist the current regime to dashboard settings for visibility."""
+        try:
+            self.runtime_settings.apply_auto_tune({
+                "auto_tune": True,
+                "auto_tune_profile": f"llm-{regime.strategy_mode}-{regime.trading_bias}",
+                "auto_tune_summary": (
+                    f"LLM Regime: {regime.strategy_mode} / {regime.trading_bias} bias "
+                    f"(conf={regime.llm_confidence:.2f}). {regime.llm_reasoning[:200]}"
+                ),
+                "symbol": self.settings.symbol,
+                "timeframe": "M1",
+                "bars": 300,
+                "ema_fast": regime.ema_fast,
+                "ema_slow": regime.ema_slow,
+                "ema_trend": regime.ema_trend,
+                "atr_period": regime.atr_period,
+                "rsi_period": regime.rsi_period,
+                "sl_atr_multiplier": regime.sl_atr_multiplier,
+                "tp_atr_multiplier": regime.tp_atr_multiplier,
+                "min_stop_points": regime.min_stop_points,
+                "min_signal_confidence": regime.min_signal_confidence,
+                "cooldown_seconds": regime.cooldown_seconds,
+                "use_risk_sizing": True,
+                "lots": 0.04,
+                "max_spread_percent": 0.15,
+                "max_spread_points": 0,
+                "settings_refresh_seconds": 60,
+            })
+        except Exception as exc:
+            logger.warning("Failed to persist regime to dashboard: %s", exc)
+
     def _evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        rates = self._rates(payload)
+        """Fast-path signal evaluation with MTF trend-confirmed pullback entry."""
+        rates_m1 = self._rates(payload)
         point = float(payload.get("point") or self._default_point())
         account = self._account(payload.get("account", {}))
         spread_points = float(payload.get("spread_points", 0.0))
         positions_count = int(payload.get("positions_count", 0))
 
-        runtime = self.runtime_settings.effective()
+        if self._regime_brain_started:
+            self.update_regime_from_payload(payload)
+
+        region_runtime = self._current_regime.effective_runtime()
+        dashboard_overrides = self.runtime_settings.effective()
+        runtime: dict[str, Any] = {
+            **region_runtime,
+            **{k: v for k, v in dashboard_overrides.items() if v is not None},
+        }
+
         magic_number = int(runtime.get("magic_number", self.settings.magic_number))
         allowed, risk_reason = self.risk.can_trade(account, runtime)
         if not allowed:
@@ -55,39 +181,46 @@ class SignalEngine:
 
         max_spread = float(runtime.get("max_spread_points", self.settings.max_spread_points))
         if max_spread > 0 and spread_points > max_spread:
-            return self._hold(
-                f"Spread blocked trade: {spread_points:.1f} > {max_spread:.1f}",
-                runtime=runtime,
-            )
+            return self._hold(f"Spread blocked: {spread_points:.1f} > {max_spread:.1f}", runtime=runtime)
 
-        max_pos = int(runtime.get("max_positions", self.settings.max_positions))
+        max_pos = int(runtime.get("max_positions", 1))
         if positions_count >= max_pos:
-            return self._hold(
-                f"Position cap blocked trade: {positions_count} >= {max_pos}",
-                runtime=runtime,
-            )
+            return self._hold(f"Position cap: {positions_count} >= {max_pos}", runtime=runtime)
 
-        signal = self._analyze_with_runtime(rates, point, runtime)
+        # ── Extract M5 rates for trend confirmation ──
+        rates_m5 = self._extract_tf_rates(payload, "M5") or self._extract_tf_rates(payload, "H1")
+
+        # ── Gold autopilot: merge MTF profile into runtime ──
+        if bool(runtime.get("auto_tune", False)):
+            profile = self._gold_autopilot_profile(payload, runtime, rates_m1, rates_m5, point)
+            if profile:
+                runtime = profile["runtime"]
+                signal = profile["signal"]
+            else:
+                signal = self.strategy.analyze(rates_m1, rates_m5, point, runtime)
+        else:
+            signal = self.strategy.analyze(rates_m1, rates_m5, point, runtime)
+
         if not signal.is_trade:
             return self._hold(signal.reason, signal.confidence, runtime=runtime)
 
-        # Use runtime LLM min score override if available, else .env default
-        llm_min_score = runtime.get("llm_min_score", self.settings.llm_min_score)
-        llm_filter = self._llm_filter(runtime)
-        if llm_filter:
-            decision = llm_filter.review(
-                signal,
-                rates,
-                account,
-                spread_points,
-                positions_count,
-                symbol=str(payload.get("symbol", self.settings.symbol)),
-                timeframe=str(payload.get("timeframe", self.settings.timeframe)),
-                fail_closed=bool(runtime["llm_fail_closed"]),
+        # ── Trading bias filter ──
+        bias = self._current_regime.trading_bias
+        if bias == "bullish" and signal.action == "SELL":
+            return self._hold(f"Regime bias ({bias}) blocked SELL", runtime=runtime)
+        if bias == "bearish" and signal.action == "BUY":
+            return self._hold(f"Regime bias ({bias}) blocked BUY", runtime=runtime)
+
+        # ── R:R gate ──
+        est_spread = spread_points * point
+        net_tp = signal.tp_distance - est_spread
+        net_sl = signal.sl_distance + est_spread
+        min_rr = float(runtime.get("min_risk_reward", 1.5))
+        if net_tp > 0 and net_sl > 0 and net_tp / net_sl < min_rr:
+            return self._hold(
+                f"Net R:R {net_tp/net_sl:.1f} < {min_rr:.1f}",
                 runtime=runtime,
             )
-            if not decision.approved or decision.score < llm_min_score:
-                return self._hold(f"DeepSeek blocked: {decision.reason}", decision.score, runtime=runtime)
 
         sl_points = max(1, int(math.ceil(signal.sl_distance / point)))
         tp_points = max(1, int(math.ceil(signal.tp_distance / point)))
@@ -101,28 +234,77 @@ class SignalEngine:
             "tp_points": tp_points,
             "magic": magic_number,
             "metadata": signal.metadata,
+            "exit_rules": signal.exit_rules,
+            "entry_price": signal.entry_price,
+            "entry_atr": signal.entry_atr,
         }
-
-    def _llm_filter(self, runtime: dict[str, Any] | None = None) -> DeepSeekRiskFilter | None:
-        effective = runtime or self.runtime_settings.effective()
-        if not effective["use_llm"]:
-            return None
-        if self.llm is None:
-            self.llm = DeepSeekRiskFilter(self.settings)
-        return self.llm
 
     def record_trade_result(self, payload: dict[str, Any]) -> dict[str, Any]:
         success = bool(payload.get("success", False))
         if success:
-            self.risk.record_trade(self._account(payload.get("account", {})))
+            self.risk.record_trade(self._account(payload.get("account", {})), success=True)
         self.events.append_trade_result(payload, success)
         return {"ok": True, "recorded": success}
+
+    def evaluate_exit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Check exit conditions for an active trade. Called by EA after each bar close."""
+        trade_id = int(payload.get("trade_id", 0))
+        if trade_id <= 0:
+            return {"action": "HOLD", "reason": "invalid trade_id"}
+
+        rates_m1 = self._rates(payload)
+        if not rates_m1:
+            return {"action": "HOLD", "reason": "no rates"}
+
+        rates_m5 = self._extract_tf_rates(payload, "M5")
+        trend_dir = 0
+        if rates_m5:
+            from .indicators import add_indicators
+            data = add_indicators(rates_m5, 8, 21, 55, 14, 14)
+            ready = [r for r in data if all(r.get(k) is not None for k in ("ema_fast", "ema_slow", "ema_trend"))]
+            if ready:
+                last = ready[-1]
+                ef, es, et = float(last["ema_fast"]), float(last["ema_slow"]), float(last["ema_trend"])
+                if ef > es > et:
+                    trend_dir = 1
+                elif ef < es < et:
+                    trend_dir = -1
+
+        result = self.exit_mgr.evaluate(trade_id, rates_m1, rates_m5, trend_dir)
+        state = self.exit_mgr.get_state(trade_id) or {}
+        point = float(payload.get("point") or self._default_point())
+
+        response: dict[str, Any] = {"action": result.action, "reason": result.reason}
+        if state.get("breakeven_triggered") and not state.get("trailing_active"):
+            response["new_sl_points"] = 0
+        if state.get("trailing_active"):
+            response["trailing_active"] = True
+        return response
 
     def _rates(self, payload: dict[str, Any]) -> list[Rate]:
         rates = payload.get("rates")
         if not isinstance(rates, list):
             raise ValueError("Payload must include a rates list")
 
+        return self._normalize_rates(rates)
+
+    def _rates_by_timeframe(self, payload: dict[str, Any], fallback_rates: list[Rate]) -> dict[str, list[Rate]]:
+        raw = (
+            payload.get("multi_timeframe_rates")
+            or payload.get("rates_by_timeframe")
+            or payload.get("timeframes")
+        )
+        normalized: dict[str, list[Rate]] = {}
+        if isinstance(raw, dict):
+            for timeframe, rates in raw.items():
+                if isinstance(timeframe, str) and isinstance(rates, list) and rates:
+                    normalized[timeframe.upper()] = self._normalize_rates(rates)
+
+        payload_timeframe = str(payload.get("timeframe", self.settings.timeframe)).upper()
+        normalized.setdefault(payload_timeframe, fallback_rates)
+        return normalized
+
+    def _normalize_rates(self, rates: list[Any]) -> list[Rate]:
         normalized: list[Rate] = []
         for row in rates:
             if not isinstance(row, dict):
@@ -148,9 +330,45 @@ class SignalEngine:
     def _default_point(self) -> float:
         return 0.01 if self.settings.symbol.upper().startswith("XAU") else 0.00001
 
-    def _analyze_with_runtime(self, rates: list[Rate], point: float, runtime: dict[str, Any]) -> Any:
-        """Run strategy analysis using runtime dashboard overrides."""
-        return self.strategy.analyze(rates, point, runtime)
+    def _persist_market_profile(self, runtime: dict[str, Any]) -> None:
+        now = time_module.time()
+        refresh_seconds = max(60, int(runtime.get("settings_refresh_seconds", 60)))
+        with self._auto_tune_lock:
+            if self._last_market_auto_tune_update and now - self._last_market_auto_tune_update < refresh_seconds:
+                return
+            self._last_market_auto_tune_update = now
+
+        keys = {
+            "symbol",
+            "timeframe",
+            "bars",
+            "ema_fast",
+            "ema_slow",
+            "ema_trend",
+            "atr_period",
+            "rsi_period",
+            "sl_atr_multiplier",
+            "tp_atr_multiplier",
+            "min_stop_points",
+            "min_signal_confidence",
+            "use_risk_sizing",
+            "lots",
+            "max_positions",
+            "max_spread_points",
+            "max_spread_percent",
+            "cooldown_seconds",
+            "one_trade_per_bar",
+            "bars_to_send",
+            "request_timeout_ms",
+            "request_retries",
+            "retry_delay_ms",
+            "settings_refresh_seconds",
+            "auto_tune",
+            "auto_tune_profile",
+            "auto_tune_summary",
+        }
+        self.runtime_settings.apply_auto_tune({key: runtime[key] for key in keys if key in runtime})
+        self._last_market_auto_tune_update = now
 
     def _hold(
         self,
@@ -171,17 +389,58 @@ class SignalEngine:
             "metadata": {},
         }
 
+    def _extract_tf_rates(self, payload: dict[str, Any], timeframe: str) -> list[Rate] | None:
+        multi_data = (
+            payload.get("multi_timeframe_rates")
+            or payload.get("rates_by_timeframe")
+            or payload.get("timeframes")
+        )
+        if isinstance(multi_data, dict):
+            tf_data = multi_data.get(timeframe)
+            if isinstance(tf_data, list) and tf_data:
+                return self._normalize_rates(tf_data)
+        return None
+
+    def _gold_autopilot_profile(
+        self,
+        payload: dict[str, Any],
+        runtime: dict[str, Any],
+        rates_m1: list[Rate],
+        rates_m5: list[Rate] | None,
+        point: float,
+    ) -> dict[str, Any] | None:
+        """Gold autopilot: use M5 trend + M1 entry with optimized params."""
+        symbol = str(payload.get("symbol", runtime.get("symbol", self.settings.symbol))).upper()
+        if _detect_asset_class(symbol) != "gold":
+            return None
+
+        profile = _gold_market_profiles().get("M1", {})
+        merged_runtime = {**runtime, **profile}
+
+        signal = self.strategy.analyze(rates_m1, rates_m5, point, merged_runtime)
+        if not signal.is_trade:
+            return None
+
+        merged_runtime["auto_tune"] = True
+        merged_runtime["auto_tune_profile"] = "gold-autopilot"
+        merged_runtime["auto_tune_summary"] = (
+            f"Gold autopilot: {signal.action} conf={signal.confidence:.2f} "
+            f"SL={signal.sl_distance:.5f} TP={signal.tp_distance:.5f}"
+        )
+        self._persist_market_profile(merged_runtime)
+        return {"runtime": merged_runtime, "signal": signal}
+
 
 class SignalContext:
     def __init__(
         self,
         engine: SignalEngine,
-        token: str,
+        password: str,
         event_store: EventStore,
         runtime_settings: RuntimeSettingsStore,
     ) -> None:
         self.engine = engine
-        self.token = token
+        self.password = password
         self.events = event_store
         self.runtime_settings = runtime_settings
 
@@ -191,6 +450,10 @@ context: SignalContext | None = None
 
 class SignalHandler(BaseHTTPRequestHandler):
     server_version = "TrendScalperSignalService/0.1"
+    _MAX_BODY_BYTES = 1_048_576  # 1 MB limit
+    _rate_limit: dict[str, list[float]] = {}
+    _MAX_REQUESTS_PER_WINDOW = 60
+    _RATE_WINDOW_SECONDS = 10.0
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -198,17 +461,16 @@ class SignalHandler(BaseHTTPRequestHandler):
             self._send({"ok": True})
             return
         if parsed.path in {"/", "/dashboard"}:
-            token = context.token if context and context.engine.settings.dashboard_auto_token else ""
-            self._send_html(dashboard_html(token))
+            self._send_html(dashboard_html())
             return
         if parsed.path == "/api/status":
-            if not self._authorized(context.token if context else ""):
+            if not self._authorized():
                 self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             self._send(context.events.status() if context else {"ok": False})
             return
         if parsed.path == "/api/events":
-            if not self._authorized(context.token if context else ""):
+            if not self._authorized():
                 self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             query = parse_qs(parsed.query)
@@ -216,7 +478,7 @@ class SignalHandler(BaseHTTPRequestHandler):
             self._send({"events": context.events.recent(limit) if context else []})
             return
         if parsed.path == "/api/settings":
-            if not self._authorized(context.token if context else ""):
+            if not self._authorized():
                 self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             self._send(
@@ -227,6 +489,9 @@ class SignalHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path == "/api/runtime-settings":
+            if not self._authorized():
+                self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
             self._send(context.runtime_settings.effective() if context else {})
             return
         if parsed.path == "/api/symbol-info":
@@ -238,6 +503,15 @@ class SignalHandler(BaseHTTPRequestHandler):
                 "presets": _asset_presets(symbol),
             })
             return
+        if parsed.path == "/api/regime":
+            if not self._authorized():
+                self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            if context:
+                self._send(context.engine.get_regime_status())
+            else:
+                self._send({"error": "context not available"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
         self._send({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -245,13 +519,19 @@ class SignalHandler(BaseHTTPRequestHandler):
             if context is None:
                 self._send({"error": "service not initialized"}, HTTPStatus.SERVICE_UNAVAILABLE)
                 return
-            if not self._authorized(context.token):
+            if not self._authorized():
                 self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            if not self._check_rate_limit():
+                self._send({"error": "rate limit exceeded"}, HTTPStatus.TOO_MANY_REQUESTS)
                 return
 
             payload = self._read_json()
             if self.path == "/signal":
                 self._send(context.engine.evaluate(payload))
+                return
+            if self.path == "/exit":
+                self._send(context.engine.evaluate_exit(payload))
                 return
             if self.path == "/trade-result":
                 self._send(context.engine.record_trade_result(payload))
@@ -262,22 +542,41 @@ class SignalHandler(BaseHTTPRequestHandler):
             self._send({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
             logger.exception("Signal request failed: %s", exc)
-            self._send({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._send({"error": "internal error"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
 
-    def _authorized(self, token: str) -> bool:
-        if not token:
+    def _authorized(self) -> bool:
+        if not context or not context.password:
+            return False
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == context.password:
             return True
-        auth_ok = self.headers.get("Authorization") == f"Bearer {token}"
-        header_ok = self.headers.get("X-Signal-Token") == token
-        return auth_ok or header_ok
+        header_pw = self.headers.get("X-Signal-Password", "")
+        return header_pw == context.password
+
+    def _check_rate_limit(self) -> bool:
+        now = time_module.time()
+        client_key = self.client_address[0]
+        window = self._RATE_WINDOW_SECONDS
+        if client_key not in self._rate_limit:
+            self._rate_limit[client_key] = []
+        timestamps = self._rate_limit[client_key]
+        timestamps[:] = [t for t in timestamps if now - t < window]
+        if len(timestamps) >= self._MAX_REQUESTS_PER_WINDOW:
+            return False
+        timestamps.append(now)
+        if len(self._rate_limit) > 1000:
+            self._rate_limit.clear()
+        return True
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
+        if length > self._MAX_BODY_BYTES:
+            raise ValueError(f"Request body exceeds {self._MAX_BODY_BYTES} bytes")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _send(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -375,9 +674,145 @@ def _asset_presets(symbol: str) -> dict[str, Any]:
         "description": "Unknown — default trend scalper settings",
     }
 
+ 
+def _gold_market_profiles() -> dict[str, dict[str, Any]]:
+    """Default gold market profiles for M1/M5/M15 scalping.
+    
+    These are starting defaults that can be overridden by LLM optimization.
+    M1 profile is optimized for aggressive scalping with fast take-profit.
+    """
+    return {
+        "M1": {
+            "timeframe": "M1",
+            "bars": 300,
+            "ema_fast": 8,
+            "ema_slow": 21,
+            "ema_trend": 55,
+            "atr_period": 14,
+            "rsi_period": 14,
+            "sl_atr_multiplier": 1.3,
+            "tp_atr_multiplier": 1.8,
+            "min_stop_points": 80,
+            "min_signal_confidence": 0.64,
+            "use_risk_sizing": True,
+            "lots": 0.12,
+            "max_positions": 2,
+            "max_spread_percent": 0.15,
+            "cooldown_seconds": 113,
+            "one_trade_per_bar": True,
+            "request_timeout_ms": 30000,
+            "request_retries": 1,
+            "retry_delay_ms": 750,
+        },
+        "M5": {
+            "timeframe": "M5",
+            "bars": 300,
+            "ema_fast": 9,
+            "ema_slow": 21,
+            "ema_trend": 55,
+            "atr_period": 14,
+            "rsi_period": 14,
+            "sl_atr_multiplier": 1.35,
+            "tp_atr_multiplier": 2.0,
+            "min_stop_points": 100,
+            "min_signal_confidence": 0.64,
+            "use_risk_sizing": True,
+            "lots": 0.04,
+            "max_positions": 1,
+            "max_spread_percent": 0.15,
+            "cooldown_seconds": 210,
+            "one_trade_per_bar": True,
+            "request_timeout_ms": 30000,
+            "request_retries": 1,
+            "retry_delay_ms": 750,
+        },
+        "M15": {
+            "timeframe": "M15",
+            "bars": 240,
+            "ema_fast": 10,
+            "ema_slow": 30,
+            "ema_trend": 80,
+            "atr_period": 14,
+            "rsi_period": 14,
+            "sl_atr_multiplier": 1.5,
+            "tp_atr_multiplier": 2.2,
+            "min_stop_points": 120,
+            "min_signal_confidence": 0.62,
+            "use_risk_sizing": True,
+            "lots": 0.04,
+            "max_positions": 1,
+            "max_spread_percent": 0.15,
+            "cooldown_seconds": 300,
+            "one_trade_per_bar": True,
+            "request_timeout_ms": 30000,
+            "request_retries": 1,
+            "retry_delay_ms": 750,
+        },
+    }
 
-def dashboard_html(auto_token: str = "") -> str:
-    return DASHBOARD_HTML_TEMPLATE.replace("__AUTO_SIGNAL_TOKEN__", json.dumps(auto_token))
+
+def _gold_market_selection_score(
+    timeframe: str,
+    signal: TradeSignal,
+    actions: dict[str, str],
+) -> float:
+    score = float(signal.confidence)
+    if not signal.is_trade:
+        return score * 0.35
+
+    score += {"M1": 0.02, "M5": 0.05, "M15": 0.03}.get(timeframe, 0.0)
+    action = signal.action
+    for context_timeframe, aligned_bonus, opposite_penalty in (
+        ("M15", 0.10, 0.18),
+        ("M5", 0.07, 0.12),
+        ("M1", 0.03, 0.06),
+    ):
+        context_action = actions.get(context_timeframe)
+        if not context_action or context_timeframe == timeframe:
+            continue
+        if context_action == action:
+            score += aligned_bonus
+        else:
+            score -= opposite_penalty
+    return score
+
+
+def _gold_lots_cap(risk_percent: float) -> float:
+    return round(max(0.01, min(0.20, risk_percent * 0.4)), 2)
+
+
+def _gold_market_summary(
+    selected_timeframe: str,
+    analyses: list[dict[str, Any]],
+    selected_signal: TradeSignal,
+) -> str:
+    parts = []
+    for item in analyses:
+        signal = item["signal"]
+        parts.append(f"{item['timeframe']} {signal.action} {float(signal.confidence):.2f}")
+    selected_runtime = next(
+        item["runtime"] for item in analyses if item["timeframe"] == selected_timeframe
+    )
+    return (
+        f"Gold MTF autopilot selected {selected_timeframe}: "
+        f"EMA {selected_runtime['ema_fast']}/{selected_runtime['ema_slow']}/{selected_runtime['ema_trend']}, "
+        f"confidence {selected_runtime['min_signal_confidence']:.2f}, "
+        f"SL x{selected_runtime['sl_atr_multiplier']:.2f}, TP x{selected_runtime['tp_atr_multiplier']:.2f}. "
+        f"Scan M1/M5/M15 every 60s: {', '.join(parts)}. "
+        f"Decision {selected_signal.action} {selected_signal.confidence:.2f}."
+    )
+
+
+def _gold_market_hold_reason(analyses: list[dict[str, Any]]) -> str:
+    parts = []
+    for item in analyses:
+        signal = item["signal"]
+        parts.append(f"{item['timeframe']} {signal.action} {float(signal.confidence):.2f}")
+    return f"Gold MTF HOLD: no M1/M5/M15 trend scalp passed filters ({', '.join(parts)})"
+
+
+def dashboard_html() -> str:
+    return DASHBOARD_HTML_TEMPLATE
 
 
 DASHBOARD_HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -458,8 +893,8 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 <header>
 <h1>⚡ <span>Trend Scalper AI</span></h1>
 <div class="row-center" style="gap:10px">
-  <input id="tokenInput" type="password" placeholder="Signal token" style="width:150px">
-  <button onclick="saveToken()" class="btn-outline">Token</button>
+  <input id="tokenInput" type="password" placeholder="Signal password" style="width:150px">
+  <button onclick="savePassword()" class="btn-outline">Auth</button>
   <div id="topBar" class="row-center" style="gap:14px;font-size:12px;color:var(--muted)">Loading...</div>
 </div>
 </header>
@@ -509,7 +944,7 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 <section class="panel hero hidden" id="aiAutopilotPanel">
   <div class="row-spread">
     <h2>🧠 LLM Expert Autopilot <span id="autoProfile" class="mode-chip">manual</span></h2>
-    <span class="soft-note">You control only Risk % · Daily Loss % · Max Trades/Day · LLM Min Score · LLM Timeout.</span>
+    <span class="soft-note">You control Risk % · Daily Loss % · Max Trades/Day · Max Positions · LLM Min Score · LLM Timeout.</span>
   </div>
   <div class="autopilot-grid" id="autoTuneCards"></div>
   <div class="divider"></div>
@@ -561,6 +996,7 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
     <label class="field"><span class="label">Max Trades/Day</span><input id="cfgMaxTrades" type="number" min="1" max="1000" value="8" style="width:90px"></label>
     <label class="field"><span class="label">LLM Min Score</span><input id="cfgLlmScore" type="number" step="0.01" min="0" max="1" value="0.65" style="width:90px"></label>
     <label class="field"><span class="label">LLM Timeout</span><input id="cfgLlmTimeout" type="number" min="1" max="60" value="8" style="width:80px"></label>
+    <label class="field"><span class="label">Max Positions</span><input id="cfgMaxPosLlm" type="number" min="1" value="2" style="width:85px" title="Set to any number — no upper limit"></label>
     <button onclick="saveStrategy()" class="btn-accent">Save</button>
   </div>
 </section>
@@ -577,16 +1013,15 @@ th:last-child,td:last-child{border-radius:0 8px 8px 0}
 <div id="toast" class="hidden"></div>
 </main>
 <script>
-window.SIGTOKEN=__AUTO_SIGNAL_TOKEN__;
 const tokenInput=document.getElementById('tokenInput')||null;
 let symTimeout=null;
 let currentPreset=null;
-function authToken(){return window.SIGTOKEN||localStorage.getItem('signalToken')||''}
-const h=()=>{const t=authToken();return t?{Authorization:`Bearer ${t}`}:{}}; 
+function authHeaders(){const pw=localStorage.getItem('signalPassword')||'';return pw?{'X-Signal-Password':pw}:{};}
+const h=()=>authHeaders();
 async function requestJson(p,opts={},retried=false){
   const r=await fetch(p,{...opts,headers:{...(opts.headers||{}),...h()}});
-  if(r.status===401&&!retried&&window.SIGTOKEN&&localStorage.getItem('signalToken')){
-    localStorage.removeItem('signalToken');
+  if(r.status===401&&!retried&&localStorage.getItem('signalPassword')){
+    localStorage.removeItem('signalPassword');
     if(tokenInput)tokenInput.value='';
     return requestJson(p,opts,true);
   }
@@ -598,16 +1033,16 @@ async function P(p,d){return requestJson(p,{method:'POST',headers:{'Content-Type
 function B(v){return v?'true':'false'}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast';setTimeout(()=>t.className='hidden',2200)}
 function showError(action,e){console.error(action,e);toast('❌ '+action+': '+String(e.message||e).slice(0,140))}
-function saveToken(){
+function savePassword(){
   const value=(tokenInput&&tokenInput.value.trim())||'';
-  if(value)localStorage.setItem('signalToken',value);else localStorage.removeItem('signalToken');
-  toast(value?'Token saved':'Token cleared');
+  if(value)localStorage.setItem('signalPassword',value);else localStorage.removeItem('signalPassword');
+  toast(value?'Password saved':'Password cleared');
   refresh();
 }
 const coreFieldIds=['cfgMode','cfgDry','cfgLlm','cfgFail'];
 const strategyFieldIds=['symInput','cfgTf','cfgBars','cfgEmaF','cfgEmaS','cfgEmaT','cfgAtr','cfgRsi','cfgSlAtr','cfgTpAtr','cfgMinStop','cfgMinConf','cfgLlmScore','cfgLlmTimeout','cfgRiskPct','cfgDailyLoss','cfgMaxTrades'];
 const eaFieldIds=['cfgDry','cfgRiskSizing','cfgSpreadPct','cfgSpreadPts','cfgLots','cfgMaxPos','cfgCooldown','cfgMagic','cfgDev','cfgOneBar'];
-const riskLlmFieldIds=['cfgRiskPct','cfgDailyLoss','cfgMaxTrades','cfgLlmScore','cfgLlmTimeout'];
+const riskLlmFieldIds=['cfgRiskPct','cfgDailyLoss','cfgMaxTrades','cfgLlmScore','cfgLlmTimeout','cfgMaxPosLlm'];
 let autoSaveTimer=null;
 const dirtyFields=new Set();
 function markDirty(ids){ids.forEach(id=>dirtyFields.add(id))}
@@ -697,7 +1132,8 @@ function riskLlmPayload(){
     daily_loss_limit_percent:parseFloat(document.getElementById('cfgDailyLoss').value),
     max_trades_per_day:parseInt(document.getElementById('cfgMaxTrades').value),
     llm_min_score:parseFloat(document.getElementById('cfgLlmScore').value),
-    llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value)
+    llm_timeout_seconds:parseInt(document.getElementById('cfgLlmTimeout').value),
+    max_positions:parseInt(document.getElementById('cfgMaxPosLlm').value)
   };
 }
 
@@ -797,7 +1233,7 @@ function updateDashboardMode(s,runtime){
 
 async function refresh(){
   try{
-    if(tokenInput)tokenInput.value=localStorage.getItem('signalToken')||'';
+    if(tokenInput)tokenInput.value=localStorage.getItem('signalPassword')||'';
     const status=await G('/api/status');
     const runtime=await G('/api/runtime-settings');
     const eventsR=await G('/api/events?limit=80');
@@ -830,6 +1266,7 @@ async function refresh(){
     setValue('cfgRiskSizing',B(runtime.use_risk_sizing));
     setValue('cfgLots',runtime.lots||0.01);
     setValue('cfgMaxPos',runtime.max_positions||1);
+    setValue('cfgMaxPosLlm',runtime.max_positions||2);
     setValue('cfgCooldown',runtime.cooldown_seconds||180);
     setValue('cfgMagic',runtime.magic_number||260618);
     setValue('cfgDev',runtime.deviation_points||20);
@@ -913,21 +1350,28 @@ def main(argv: list[str] | None = None) -> int:
     runtime_settings = RuntimeSettingsStore(settings)
     event_store = EventStore(settings, runtime_settings)
 
+    # Start the async LLM regime brain if configured
+    engine = SignalEngine(settings, event_store, runtime_settings)
+    if settings.use_llm:
+        engine.start_regime_brain()
+
     global context
     context = SignalContext(
-        SignalEngine(settings, event_store, runtime_settings),
-        settings.signal_token,
+        engine,
+        settings.signal_password,
         event_store,
         runtime_settings,
     )
 
     server = ThreadingHTTPServer((settings.signal_host, settings.signal_port), SignalHandler)
     logger.info("Signal service listening on http://%s:%s", settings.signal_host, settings.signal_port)
+    logger.info("LLM regime brain: %s", "running (async, every 5-15min)" if settings.use_llm else "disabled")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logger.info("Stopping signal service")
     finally:
+        engine.stop_regime_brain()
         server.server_close()
     return 0
 

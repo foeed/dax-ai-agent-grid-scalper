@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import signal
+import threading
+import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class BridgeContext:
-    def __init__(self, client: Mt5Client, token: str) -> None:
+    def __init__(self, client: Mt5Client, password: str) -> None:
         self.client = client
-        self.token = token
+        self.password = password
 
 
 context: BridgeContext | None = None
@@ -27,6 +30,7 @@ context: BridgeContext | None = None
 
 class Mt5BridgeHandler(BaseHTTPRequestHandler):
     server_version = "TrendScalperMT5Bridge/0.1"
+    _MAX_BODY_BYTES = 1_048_576
 
     def do_GET(self) -> None:
         self._handle("GET")
@@ -42,7 +46,7 @@ class Mt5BridgeHandler(BaseHTTPRequestHandler):
             if context is None:
                 self._send({"error": "bridge not initialized"}, HTTPStatus.SERVICE_UNAVAILABLE)
                 return
-            if not self._authorized(context.token):
+            if not self._authorized():
                 self._send({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
 
@@ -112,12 +116,18 @@ class Mt5BridgeHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
+        if length > self._MAX_BODY_BYTES:
+            raise ValueError(f"Request body exceeds {self._MAX_BODY_BYTES} bytes")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
-    def _authorized(self, token: str) -> bool:
-        if not token:
+    def _authorized(self) -> bool:
+        if not context or not context.password:
+            return False
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == context.password:
             return True
-        return self.headers.get("Authorization") == f"Bearer {token}"
+        header_pw = self.headers.get("X-Bridge-Password", "")
+        return header_pw == context.password
 
     def _send(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
@@ -140,18 +150,60 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     client = Mt5Client(settings)
-    client.connect()
+
+    def _connect_with_retry():
+        max_retries = 10
+        for attempt in range(1, max_retries + 1):
+            try:
+                client.connect()
+                return True
+            except Exception as exc:
+                delay = min(2 ** attempt, 30)
+                logger.warning("MT5 connect attempt %d/%d failed: %s. Retrying in %ds...", attempt, max_retries, exc, delay)
+                if attempt < max_retries:
+                    time.sleep(delay)
+        return False
+
+    if not _connect_with_retry():
+        logger.critical("Failed to connect to MT5 after retries; exiting")
+        return 1
+
+    def _health_check_loop():
+        """Background thread: periodically check MT5 connection and reconnect if lost."""
+        while not _stop_bridge:
+            time.sleep(15)
+            try:
+                client.get_account_snapshot()
+            except Exception:
+                logger.warning("MT5 connection lost, attempting reconnect...")
+                _connect_with_retry()
+
+    _stop_bridge = False
+    health_thread = threading.Thread(target=_health_check_loop, daemon=True, name="bridge-health")
+    health_thread.start()
 
     global context
-    context = BridgeContext(client, settings.bridge_token)
+    context = BridgeContext(client, settings.bridge_password)
 
     server = ThreadingHTTPServer((settings.bridge_host, settings.bridge_port), Mt5BridgeHandler)
+    server.allow_reuse_address = True
     logger.info("MT5 bridge listening on http://%s:%s", settings.bridge_host, settings.bridge_port)
+
+    def _signal_handler(signum, frame):
+        nonlocal _stop_bridge
+        _stop_bridge = True
+        logger.info("Stopping MT5 bridge (signal %d)", signum)
+        server.shutdown()
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logger.info("Stopping MT5 bridge")
     finally:
+        _stop_bridge = True
         server.server_close()
         client.shutdown()
 

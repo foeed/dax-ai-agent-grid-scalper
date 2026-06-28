@@ -54,11 +54,19 @@ def _validate_rates(rates: list[Rate]) -> None:
         raise ValueError(f"Missing OHLC columns: {', '.join(sorted(missing))}")
 
 
+def _sma(values: list[float], period: int) -> float:
+    return sum(values[:period]) / period
+
+
 def _ema(values: list[float], period: int) -> list[float]:
     alpha = 2 / (period + 1)
     output: list[float] = []
-    current = values[0]
-    for value in values:
+    seed = _sma(values[:period], period) if len(values) >= period else values[0]
+    for i, value in enumerate(values):
+        if i == 0:
+            output.append(seed)
+            current = seed
+            continue
         current = (value * alpha) + (current * (1 - alpha))
         output.append(current)
     return output
@@ -93,7 +101,7 @@ def _rsi(close: list[float], period: int) -> list[float | None]:
         average_loss = average_losses[index]
         if index < period:
             values.append(None)
-        elif average_loss == 0:
+        elif average_loss < 1e-10:
             values.append(100.0)
         else:
             relative_strength = average_gain / average_loss
@@ -104,8 +112,12 @@ def _rsi(close: list[float], period: int) -> list[float | None]:
 def _wilders(values: list[float], period: int) -> list[float]:
     alpha = 1 / period
     output: list[float] = []
-    current = values[0]
-    for value in values:
+    seed = _sma(values[:period], period) if len(values) >= period else values[0]
+    for i, value in enumerate(values):
+        if i == 0:
+            output.append(seed)
+            current = seed
+            continue
         current = (value * alpha) + (current * (1 - alpha))
         output.append(current)
     return output

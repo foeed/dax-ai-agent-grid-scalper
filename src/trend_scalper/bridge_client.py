@@ -88,6 +88,6 @@ class BridgeMt5Client:
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self.settings.bridge_token:
-            headers["Authorization"] = f"Bearer {self.settings.bridge_token}"
+        if self.settings.bridge_password:
+            headers["X-Bridge-Password"] = self.settings.bridge_password
         return headers

@@ -14,7 +14,16 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '512M'
+        reservations:
+          cpus: '0.25'
+          memory: '128M'
     restart: unless-stopped
+    stop_grace_period: 10s
   signal-service:
     build: .
     image: trend-scalper-ai:latest
@@ -28,7 +37,7 @@ services:
       USE_LLM: ${USE_LLM:-false}
       SIGNAL_HOST: 0.0.0.0
       SIGNAL_PORT: ${SIGNAL_PORT:-8766}
-      SIGNAL_TOKEN: ${SIGNAL_TOKEN:-}
+      SIGNAL_PASSWORD: ${SIGNAL_PASSWORD:-Daxx777}
       PYTHONPATH: /app/src
     ports:
       - "${SIGNAL_PORT:-8766}:8766"
@@ -36,4 +45,13 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     command: ["python", "-m", "trend_scalper.signal_service"]
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: '1024M'
+        reservations:
+          cpus: '0.5'
+          memory: '256M'
     restart: unless-stopped
+    stop_grace_period: 15s

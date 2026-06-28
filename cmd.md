@@ -19,6 +19,25 @@ http://localhost:8766
 docker compose ps
 ```
 
+## Set Gold LLM Autopilot
+
+```powershell
+$password = (Select-String -Path .env -Pattern '^SIGNAL_PASSWORD=' | Select-Object -First 1).Line -replace '^SIGNAL_PASSWORD=', ''
+$body = @{
+  symbol = 'XAUUSD'
+  use_llm = $true
+  auto_tune = $true
+  settings_refresh_seconds = 60
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri 'http://localhost:8766/api/settings' `
+  -Method Post `
+  -Headers @{ 'X-Signal-Password' = $password } `
+  -ContentType 'application/json' `
+  -Body $body
+```
+
 ## View Logs
 
 ```powershell
@@ -43,4 +62,3 @@ docker compose run --rm bot python -m trend_scalper --once
 ```powershell
 docker compose run --rm signal-service python -m unittest discover -s tests
 ```
-

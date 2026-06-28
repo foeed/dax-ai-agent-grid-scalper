@@ -55,7 +55,7 @@ Open the monitoring dashboard:
 http://127.0.0.1:8766/dashboard
 ```
 
-If `SIGNAL_TOKEN` is set, paste it into the dashboard token box. The dashboard shows service status, dry-run mode, BUY/SELL/HOLD counts, daily risk state, and recent signal/trade events.
+If `SIGNAL_PASSWORD` is set, enter it in the dashboard password box. The dashboard shows service status, dry-run mode, BUY/SELL/HOLD counts, daily risk state, and recent signal/trade events.
 
 By default `DASHBOARD_AUTO_TOKEN=true`, so the local dashboard auto-fills the API token from the service. Keep the dashboard bound to your own machine; do not expose port `8766` to the internet.
 
@@ -75,7 +75,7 @@ If needed, edit `.env`:
 ```env
 SIGNAL_HOST=0.0.0.0
 SIGNAL_PORT=8766
-SIGNAL_TOKEN=change-me-long-random-token
+SIGNAL_PASSWORD=change-me-for-production
 USE_LLM=false
 DEEPSEEK_API_KEY=
 EVENT_LOG_PATH=data/trade_events.jsonl
@@ -215,7 +215,7 @@ tests/                              unit + e2e tests
 
 - Start with `DryRun=true`, `DRY_RUN=true`, and a demo account.
 - Do not expose the signal service or MT5 bridge to the internet.
-- Keep `SIGNAL_TOKEN` strong if binding beyond localhost.
+- Keep `SIGNAL_PASSWORD` strong if binding beyond localhost.
 - Add only `http://127.0.0.1:8766` to MT5 WebRequest unless you deliberately change the service host.
 - The EA uses the chart symbol (`_Symbol`), so it can run on any broker crypto symbol that has enough bars and allows automated trading.
 - Dashboard event logs are written to `data/trade_events.jsonl`.

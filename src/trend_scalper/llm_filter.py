@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time as time_module
 import urllib.error
 import urllib.request
 from contextvars import ContextVar
@@ -17,6 +18,11 @@ _LLM_TIMEOUT_SECONDS: ContextVar[float | None] = ContextVar("llm_timeout_seconds
 class DeepSeekRiskFilter:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._consecutive_errors = 0
+        self._circuit_open = False
+        self._circuit_open_since = 0.0
+        self._MAX_CONSECUTIVE_ERRORS = 5
+        self._CIRCUIT_RESET_SECONDS = 300
 
     def review(
         self,
@@ -101,6 +107,7 @@ class DeepSeekRiskFilter:
                 _LLM_TIMEOUT_SECONDS.reset(timeout_token)
             content = response["choices"][0]["message"].get("content") or "{}"
             raw = json.loads(content)
+            self._consecutive_errors = 0
             return LLMDecision(
                 approved=bool(raw.get("approved", False)),
                 score=max(0.0, min(1.0, float(raw.get("score", 0.0)))),
@@ -108,6 +115,12 @@ class DeepSeekRiskFilter:
             )
         except Exception as exc:
             logger.warning("DeepSeek review failed: %s", exc)
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= self._MAX_CONSECUTIVE_ERRORS:
+                if not self._circuit_open:
+                    self._circuit_open = True
+                    self._circuit_open_since = time_module.time()
+                    logger.warning("DeepSeek circuit breaker OPEN (consecutive errors: %d)", self._consecutive_errors)
             effective_fail_closed = (
                 bool(effective.get("llm_fail_closed", self.settings.llm_fail_closed))
                 if fail_closed is None

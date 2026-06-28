@@ -32,12 +32,22 @@ def _bool(name: str, default: bool) -> bool:
 
 def _optional_int(name: str) -> int | None:
     value = _str(name)
-    return None if value == "" else int(value)
+    if value == "":
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _optional_float(name: str) -> float | None:
     value = _str(name)
-    return None if value == "" else float(value)
+    if value == "":
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _load_env_file(path: str | Path) -> None:
@@ -98,13 +108,19 @@ class Settings:
     llm_fail_closed: bool
 
     bridge_url: str
-    bridge_token: str
+    bridge_password: str
     bridge_host: str
     bridge_port: int
 
     signal_host: str
     signal_port: int
-    signal_token: str
+    signal_password: str
+
+    max_session_drawdown_percent: float
+    max_consecutive_losses: int
+    trailing_stop_atr_multiplier: float
+    min_risk_reward: float
+    time_stop_bars: int
 
     mt5_login: int | None
     mt5_password: str
@@ -166,12 +182,17 @@ def load_settings(env_file: str | Path | None = ".env") -> Settings:
         llm_timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 8.0),
         llm_fail_closed=_bool("LLM_FAIL_CLOSED", True),
         bridge_url=_str("BRIDGE_URL", "http://host.docker.internal:8765"),
-        bridge_token=_str("BRIDGE_TOKEN"),
+        bridge_password=_str("BRIDGE_PASSWORD", "Daxx777"),
         bridge_host=_str("BRIDGE_HOST", "127.0.0.1"),
         bridge_port=_int("BRIDGE_PORT", 8765),
         signal_host=_str("SIGNAL_HOST", "0.0.0.0"),
         signal_port=_int("SIGNAL_PORT", 8766),
-        signal_token=_str("SIGNAL_TOKEN"),
+        signal_password=_str("SIGNAL_PASSWORD", "Daxx777"),
+        max_session_drawdown_percent=_float("MAX_SESSION_DRAWDOWN_PERCENT", 5.0),
+        max_consecutive_losses=_int("MAX_CONSECUTIVE_LOSSES", 4),
+        trailing_stop_atr_multiplier=_float("TRAILING_STOP_ATR_MULTIPLIER", 0.5),
+        min_risk_reward=_float("MIN_RISK_REWARD", 1.5),
+        time_stop_bars=_int("TIME_STOP_BARS", 15),
         mt5_login=_optional_int("MT5_LOGIN"),
         mt5_password=_str("MT5_PASSWORD"),
         mt5_server=_str("MT5_SERVER"),
@@ -196,6 +217,8 @@ def validate_settings(settings: Settings) -> list[str]:
         errors.append("MT5_PASSWORD is required when MT5_LOGIN is set.")
     if settings.use_llm and not settings.deepseek_api_key:
         errors.append("DEEPSEEK_API_KEY is required when USE_LLM=true.")
+    if settings.trading_mode == "live" and not settings.signal_password:
+        errors.append("SIGNAL_PASSWORD is required for live trading.")
     if settings.risk_percent <= 0 or settings.risk_percent > 5:
         errors.append("RISK_PERCENT should be > 0 and <= 5.")
     if settings.max_lot < settings.min_lot:
@@ -206,5 +229,21 @@ def validate_settings(settings: Settings) -> list[str]:
         errors.append("MIN_SIGNAL_CONFIDENCE must be between 0 and 1.")
     if settings.llm_min_score < 0 or settings.llm_min_score > 1:
         errors.append("LLM_MIN_SCORE must be between 0 and 1.")
+    if settings.poll_seconds < 1:
+        errors.append("POLL_SECONDS must be >= 1.")
+    if settings.cooldown_seconds < 0:
+        errors.append("COOLDOWN_SECONDS must be >= 0.")
+    if settings.max_trades_per_day < 1:
+        errors.append("MAX_TRADES_PER_DAY must be >= 1.")
+    if settings.max_positions < 1:
+        errors.append("MAX_POSITIONS must be >= 1.")
+    if settings.magic_number > 2147483647 or settings.magic_number < -2147483648:
+        errors.append("MAGIC_NUMBER must fit in int32 range.")
+    if settings.fixed_lot is not None and settings.fixed_lot <= 0:
+        errors.append("FIXED_LOT must be > 0 when set.")
+    if settings.daily_loss_limit_percent < 0 or settings.daily_loss_limit_percent > 100:
+        errors.append("DAILY_LOSS_LIMIT_PERCENT must be between 0 and 100.")
+    if settings.max_session_drawdown_percent < 0 or settings.max_session_drawdown_percent > 100:
+        errors.append("MAX_SESSION_DRAWDOWN_PERCENT must be between 0 and 100.")
 
     return errors

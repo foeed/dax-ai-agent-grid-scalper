@@ -9,8 +9,9 @@ CTrade trade;
 
 // --- Static inputs (connection details, unlikely to change at runtime) ---
 input string SignalUrl = "http://127.0.0.1:8766/signal";
+input string ExitUrl = "http://127.0.0.1:8766/exit";
 input string RuntimeSettingsUrl = "http://127.0.0.1:8766/api/runtime-settings";
-input string SignalToken = "change-me-long-random-token";
+input string SignalPassword = "Daxx777";
 input ENUM_TIMEFRAMES SignalTimeframe = PERIOD_M1;
 
 // --- Runtime defaults (overridden by dashboard) ---
@@ -30,17 +31,17 @@ input int EmaSlow = 21;
 input int EmaTrend = 55;
 input int AtrPeriod = 14;
 input int RsiPeriod = 14;
-input double SlAtrMultiplier = 1.3;
-input double TpAtrMultiplier = 1.8;
+input double SlAtrMultiplier = 1.8;
+input double TpAtrMultiplier = 3.5;
 input int MinStopPoints = 80;
-input double MinSignalConfidence = 0.62;
+input double MinSignalConfidence = 0.55;
 input int RequestTimeoutMs = 30000;
 input int RequestRetries = 1;
 input int RetryDelayMs = 750;
 input bool UseLocalBacktest = true;
 
 // --- Runtime settings refresh interval (seconds) ---
-input int SettingsRefreshSeconds = 30;
+input int SettingsRefreshSeconds = 60;
 
 // --- Runtime settings cache (fetched from dashboard) ---
 struct RuntimeConfig {
@@ -68,6 +69,7 @@ struct RuntimeConfig {
    int request_timeout_ms;
    int request_retries;
    int retry_delay_ms;
+   int settings_refresh_seconds;
    bool use_llm;
    bool llm_fail_closed;
 };
@@ -111,6 +113,7 @@ int OnInit()
    g_runtime.request_timeout_ms = RequestTimeoutMs;
    g_runtime.request_retries = RequestRetries;
    g_runtime.retry_delay_ms = RetryDelayMs;
+   g_runtime.settings_refresh_seconds = SettingsRefreshSeconds;
    g_runtime.use_llm = false;
    g_runtime.llm_fail_closed = true;
 
@@ -141,7 +144,7 @@ void OnTick()
    bool local_backtest = (UseLocalBacktest && g_is_tester);
 
    // Periodically refresh runtime settings from dashboard when WebRequest is available
-   if (!local_backtest && TimeCurrent() - last_settings_fetch >= SettingsRefreshSeconds)
+   if (!local_backtest && TimeCurrent() - last_settings_fetch >= g_runtime.settings_refresh_seconds)
    {
       FetchRuntimeSettings();
       last_settings_fetch = TimeCurrent();
@@ -250,12 +253,19 @@ void OnTick()
       return;
    }
 
+   long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   if (sl_points < stops_level || tp_points < stops_level)
+   {
+      PrintFormat("SL/TP below broker minimum: sl=%d tp=%d min=%d points; refusing trade",
+                  sl_points, tp_points, stops_level);
+      return;
+   }
+
    bool success = ExecuteSignal(action, sl_points, tp_points);
    if (g_runtime.dry_run)
       return;
 
-   if (success)
-      last_trade_time = TimeCurrent();
+   last_trade_time = TimeCurrent();
 
    if (!local_backtest)
       NotifyTradeResult(action, success, reason);
@@ -300,11 +310,12 @@ void FetchRuntimeSettings()
    g_runtime.request_timeout_ms = (int)JsonDouble(response, "request_timeout_ms", g_runtime.request_timeout_ms);
    g_runtime.request_retries = (int)JsonDouble(response, "request_retries", g_runtime.request_retries);
    g_runtime.retry_delay_ms = (int)JsonDouble(response, "retry_delay_ms", g_runtime.retry_delay_ms);
+   g_runtime.settings_refresh_seconds = MathMax(5, (int)JsonDouble(response, "settings_refresh_seconds", g_runtime.settings_refresh_seconds));
    g_runtime.use_llm = JsonBool(response, "use_llm", g_runtime.use_llm);
    g_runtime.llm_fail_closed = JsonBool(response, "llm_fail_closed", g_runtime.llm_fail_closed);
 
    PrintFormat(
-      "Runtime settings refreshed: dry_run=%s sizing=%s risk=%.2f%% lots_cap=%.2f max_pos=%d max_spread=%d max_spread_pct=%.2f%% cooldown=%d magic=%d dev=%d one_bar=%s bars=%d timeout=%d retries=%d use_llm=%s",
+      "Runtime settings refreshed: dry_run=%s sizing=%s risk=%.2f%% lots_cap=%.2f max_pos=%d max_spread=%d max_spread_pct=%.2f%% cooldown=%d magic=%d dev=%d one_bar=%s bars=%d timeout=%d retries=%d refresh=%ds use_llm=%s",
       g_runtime.dry_run ? "true" : "false",
       g_runtime.use_risk_sizing ? "risk" : "fixed",
       g_runtime.risk_percent,
@@ -319,6 +330,7 @@ void FetchRuntimeSettings()
       g_runtime.bars_to_send,
       g_runtime.request_timeout_ms,
       g_runtime.request_retries,
+      g_runtime.settings_refresh_seconds,
       g_runtime.use_llm ? "true" : "false"
    );
 }
@@ -335,8 +347,8 @@ int GetJson(string url, string &response)
    response = "";
 
    string headers = "Content-Type: application/json\r\n";
-   if (SignalToken != "")
-      headers += "Authorization: Bearer " + SignalToken + "\r\n";
+   if (SignalPassword != "")
+      headers += "Authorization: Bearer " + SignalPassword + "\r\n";
 
    int max_attempts = MathMax(1, g_runtime.request_retries + 1);
    int status = -1;
@@ -381,17 +393,52 @@ string BuildSignalRequest(MqlRates &rates[], int copied, long spread, int positi
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    string currency = AccountInfoString(ACCOUNT_CURRENCY);
+   int mtf_bars = g_runtime.bars_to_send;
+   if (mtf_bars < 300)
+      mtf_bars = 300;
 
    string json = "{";
    json += "\"symbol\":\"" + JsonEscape(_Symbol) + "\",";
    json += "\"timeframe\":\"" + TimeframeName(SignalTimeframe) + "\",";
+   json += "\"timeframe_candidates\":[\"M1\",\"M5\",\"M15\"],";
    json += "\"point\":" + DoubleToString(_Point, _Digits + 2) + ",";
    json += "\"spread_points\":" + IntegerToString((int)spread) + ",";
    json += "\"positions_count\":" + IntegerToString(positions_count) + ",";
    json += "\"account\":{\"balance\":" + DoubleToString(balance, 2)
-        + ",\"equity\":" + DoubleToString(equity, 2)
-        + ",\"currency\":\"" + JsonEscape(currency) + "\"},";
-   json += "\"rates\":[";
+         + ",\"equity\":" + DoubleToString(equity, 2)
+         + ",\"currency\":\"" + JsonEscape(currency) + "\"},";
+   json += "\"multi_timeframe_rates\":{";
+   AppendTimeframeRatesJson(json, PERIOD_M1, mtf_bars);
+   json += ",";
+   AppendTimeframeRatesJson(json, PERIOD_M5, mtf_bars);
+   json += ",";
+   AppendTimeframeRatesJson(json, PERIOD_M15, mtf_bars);
+   json += "},";
+   json += "\"rates\":";
+   AppendRatesArrayJson(json, rates, copied);
+   json += "}";
+   return json;
+}
+
+void AppendTimeframeRatesJson(string &json, ENUM_TIMEFRAMES timeframe, int bars)
+{
+   MqlRates timeframe_rates[];
+   int copied = CopyRates(_Symbol, timeframe, 0, bars, timeframe_rates);
+
+   json += "\"" + TimeframeName(timeframe) + "\":";
+   if (copied <= 0)
+   {
+      PrintFormat("CopyRates %s failed: %d", TimeframeName(timeframe), GetLastError());
+      json += "[]";
+      return;
+   }
+
+   AppendRatesArrayJson(json, timeframe_rates, copied);
+}
+
+void AppendRatesArrayJson(string &json, MqlRates &rates[], int copied)
+{
+   json += "[";
 
    bool first = true;
    for (int i = copied - 1; i >= 0; i--)
@@ -409,8 +456,7 @@ string BuildSignalRequest(MqlRates &rates[], int copied, long spread, int positi
       json += "}";
    }
 
-   json += "]}";
-   return json;
+   json += "]";
 }
 
 bool ExecuteSignal(string action, int sl_points, int tp_points)
@@ -775,8 +821,8 @@ int PostJson(string url, string body, string &response)
    char result[];
    string result_headers = "";
    string headers = "Content-Type: application/json\r\n";
-   if (SignalToken != "")
-      headers += "Authorization: Bearer " + SignalToken + "\r\n";
+   if (SignalPassword != "")
+      headers += "Authorization: Bearer " + SignalPassword + "\r\n";
 
    int max_attempts = MathMax(1, g_runtime.request_retries + 1);
    int status = -1;
