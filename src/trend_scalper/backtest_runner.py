@@ -62,7 +62,7 @@ def _run_single(args) -> int:
             gen.save_to_csv(rates_m1, args.generate_csv)
             print(f"  Saved to: {args.generate_csv}")
 
-    print(f"  Data: {len(rates_m1)} {timeframe} bars, {len(rates_m5) if rates_m5 else 0} M5 bars")
+    print(f"  Data: {len(rates_m1)} {timeframe} bars, {len(rates_m5) if rates_m5 else 0} trend bars")
 
     # Configure risk for budget
     risk_pct = args.risk
@@ -70,27 +70,26 @@ def _run_single(args) -> int:
         risk_pct = max(risk_pct, 1.5)
         print(f"  Small account (${equity:.0f}): using {risk_pct}% risk per trade")
 
+    # Clean stale backtest state before run
     settings = load_settings(None)
-    settings = settings.__class__(**{**settings.__dict__, "symbol": symbol,
-        "timeframe": timeframe, "min_lot": 0.01,
-        "max_lot": 0.01, "risk_percent": risk_pct,
-        "state_path": Path("data") / f"bt_state_{symbol}_{timeframe}.json",
-        "max_trades_per_day": 1000, "cooldown_seconds": 0})
-    # Clean stale backtest state
-    import os
     state_path = Path("data") / f"bt_state_{symbol}_{timeframe}.json"
     if state_path.exists():
         state_path.unlink()
+    settings = settings.__class__(**{**settings.__dict__, "symbol": symbol,
+        "timeframe": timeframe, "min_lot": 0.01,
+        "max_lot": 0.01, "risk_percent": risk_pct,
+        "state_path": state_path,
+        "max_trades_per_day": 100000, "cooldown_seconds": 0})
 
     runtime = {
         "symbol": symbol, "timeframe": timeframe,
         "risk_percent": risk_pct,
-        "min_signal_confidence": 0.55,
-        "min_risk_reward": 2.0,
+        "min_signal_confidence": 0.45,
+        "min_risk_reward": 1.5,
         "min_trend_strength": 0.45,
         "min_entry_bar_gap": 3,
         "max_positions": 1,
-        "max_trades_per_day": 1000,
+        "max_trades_per_day": 100000,
         "cooldown_seconds": 0,
         "daily_loss_limit_percent": 90.0,
         "max_session_drawdown_percent": 90.0,
@@ -102,7 +101,7 @@ def _run_single(args) -> int:
         "time_stop_bars": 25,
         "ema_fast": 8, "ema_slow": 21, "ema_trend": 55,
         "atr_period": 14, "rsi_period": 14,
-        "min_trend_strength": 0.40,
+        "min_trend_strength": 0.25,
         "min_entry_bar_gap": 3,
     }
 
@@ -146,7 +145,7 @@ def _run_comparison(args) -> int:
 
         runtime = {
             "symbol": symbol, "timeframe": tf, "risk_percent": risk,
-            "min_signal_confidence": 0.55, "min_risk_reward": 2.0,
+            "min_signal_confidence": 0.45, "min_risk_reward": 1.5,
             "min_trend_strength": 0.45, "min_entry_bar_gap": 3,
             "max_positions": 1, "max_trades_per_day": 1000, "cooldown_seconds": 0,
             "daily_loss_limit_percent": 90.0, "max_session_drawdown_percent": 90.0,

@@ -70,13 +70,13 @@ class PullbackScalperStrategy:
         # Fallback: M1-only trend if no HTF data
         if trend_dir == 0 and e_data is not None:
             td, ts, tr = self._assess_trend(e_data)
-            if td != 0 and ts > 0.35:
+            if td != 0 and ts > 0.25:
                 trend_dir = td
-                trend_str = ts * 0.75
+                trend_str = ts * 0.85
                 trend_reasons = [f"{r} (self-assessed)" for r in tr]
 
         # ── Gate: trend must exist ──
-        min_trend_strength = float(r.get("min_trend_strength", 0.40))
+        min_trend_strength = float(r.get("min_trend_strength", 0.30))
         if trend_dir == 0 or trend_str < min_trend_strength:
             return EntrySignal.no_trade(
                 f"Trend too weak (dir={trend_dir} str={trend_str:.2f} < {min_trend_strength})",
@@ -255,22 +255,23 @@ class PullbackScalperStrategy:
         tp_mult = float(r.get("tp_atr_multiplier", 3.5))
         min_stop = int(r.get("min_stop_points", 80)) * point
 
-        # Wider SL at more extreme RSI (earlier in the pullback = better entry)
         if (direction == "BUY" and rsi <= 30) or (direction == "SELL" and rsi >= 70):
-            sl_mult *= 0.85  # Slightly tighter at extremes
+            sl_mult *= 0.90
 
-        sl_distance = max(atr * sl_mult, min_stop)
-        tp_distance = max(atr * tp_mult, min_stop)
+        sl_raw = max(atr * sl_mult, min_stop)
+        tp_raw = max(atr * tp_mult, min_stop)
 
-        # ── R:R gate ──
         est_spread_points = float(r.get("spread_points", 3.5))
         est_spread = est_spread_points * point
+        sl_distance = sl_raw + est_spread * 0.7
+        tp_distance = tp_raw
+
         net_tp = tp_distance - est_spread
-        net_sl = sl_distance + est_spread
-        min_rr = float(r.get("min_risk_reward", 2.0))
+        net_sl = sl_distance + est_spread * 0.3
+        min_rr = float(r.get("min_risk_reward", 1.5))
         if net_tp > 0 and net_sl > 0 and net_tp / net_sl < min_rr:
             return EntrySignal.no_trade(
-                f"Net R:R {net_tp/net_sl:.1f} < {min_rr:.1f}",
+                f"Net R:R {net_tp/net_sl:.1f} < {min_rr:.1f} (net_tp={net_tp:.5f} net_sl={net_sl:.5f})",
                 entry_price=close, entry_atr=atr,
             )
 
@@ -283,9 +284,9 @@ class PullbackScalperStrategy:
         # ── Exit rules (delayed for profitability) ──
         exit_rules = {
             "trailing_atr_mult": 0.8,
-            "breakeven_atr_distance": 1.5,
-            "trailing_activation_atr": 2.5,
-            "time_stop_bars": int(r.get("time_stop_bars", 25)),
+            "breakeven_atr_distance": 2.0,
+            "trailing_activation_atr": 3.0,
+            "time_stop_bars": int(r.get("time_stop_bars", 30)),
             "trend_reversal_exit": True,
         }
 

@@ -73,6 +73,10 @@ class BacktestEngine:
         self._trade_counter = 0
         self._last_exit_bar_index = -999
         self._current_bar_index = 0
+        self._signals_evaluated = 0
+        self._signals_traded = 0
+        self._signals_blocked_risk = 0
+        self._signals_blocked_rr = 0
         self._equity: float = 0.0
         self._peak_equity: float = 0.0
         self._starting_equity: float = 0.0
@@ -97,6 +101,12 @@ class BacktestEngine:
         self._peak_equity = acct.equity
         self._starting_equity = acct.equity
         rt = runtime or {}
+        # Clean any stale backtest state
+        if self.settings.state_path.exists():
+            try:
+                self.settings.state_path.write_text("")
+            except OSError:
+                pass
 
         symbol = str(rt.get("symbol", self.settings.symbol))
         self._point_value = 0.01 if symbol.upper().startswith("XAU") else 0.00001
@@ -115,17 +125,19 @@ class BacktestEngine:
 
             # Check exits for active trade
             if self._active_trade is not None and self._active_signal is not None:
-                self._check_exit(rates_m1[:i + 1], rates_m5[:min(i // 5 + 1, len(rates_m5))] if rates_m5 else None,
+                self._check_exit(rates_m1[:i + 1], rates_m5[-300:] if rates_m5 and len(rates_m5) >= 65 else None,
                                  bar_time, close, high, low)
 
             # Check for new entries
             if self._active_trade is None:
+                # Enforce bar gap since last exit
+                min_gap = int(rt.get("min_entry_bar_gap", 3))
+                if self._current_bar_index - self._last_exit_bar_index < min_gap:
+                    continue
                 entry_m1 = rates_m1[max(0, i - 300):i + 1]
-                # M5 needs at least 60 bars for proper EMA(55) warmup
-                if rates_m5 and len(rates_m5) >= 60:
-                    m5_end = min(i // 5 + 1, len(rates_m5))
-                    m5_start = max(0, m5_end - 120)
-                    entry_m5 = rates_m5[m5_start:m5_end]
+                # Trend data: pass last 300 bars for EMA warmup (work for any TF)
+                if rates_m5 and len(rates_m5) >= 65:
+                    entry_m5 = rates_m5[-300:] if len(rates_m5) >= 300 else rates_m5
                 else:
                     entry_m5 = None
 
