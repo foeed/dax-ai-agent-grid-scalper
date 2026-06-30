@@ -1,0 +1,3 @@
+@echo off
+echo Showing DAX V2 Backend logs (Press Ctrl+C to stop)...
+docker-compose logs -f

@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  dax-v2-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dax-v2-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-YOUR_KEY_HERE}
+      - NEWS_API_KEY=${NEWS_API_KEY:-YOUR_KEY_HERE}
+      - DEBUG=false
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
