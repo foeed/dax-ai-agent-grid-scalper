@@ -9,7 +9,7 @@ from datetime import datetime
 
 from app.core.config import settings
 from app.core.database import DatabaseManager
-from app.routers import trading, analysis, news, risk
+from app.routers import trading, analysis, news, risk, scalp
 from app.services.scheduler import SchedulerService
 
 # Configure logging
@@ -64,6 +64,7 @@ app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["Analysis"])
 app.include_router(news.router, prefix="/api/v1/news", tags=["News"])
 app.include_router(risk.router, prefix="/api/v1/risk", tags=["Risk Management"])
+app.include_router(scalp.router, prefix="/api/v1/scalp", tags=["Scalping Engine"])
 
 @app.get("/")
 async def root():
