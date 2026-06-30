@@ -42,12 +42,12 @@ class ScalpPlanResponse(BaseModel):
     reasoning: str
 
 # Timeframe multipliers for volatility/scaling
-TF_MULTIPLIERS = {
-    "M1":  {"grid": 0.3, "sl": 0.5,  "tp": 0.8},
-    "M5":  {"grid": 0.5, "sl": 0.8,  "tp": 1.0},
-    "M15": {"grid": 0.7, "sl": 1.0,  "tp": 1.3},
-    "H1":  {"grid": 1.0, "sl": 1.5,  "tp": 2.0},
-    "H4":  {"grid": 1.5, "sl": 2.0,  "tp": 3.0},
+# HFT Timeline multipliers - tight, fast, many
+HFT = {
+    "M1":  {"grid_factor": 0.25, "sl_ratio": 0.3, "tp_ratio": 0.4, "max_orders": 8},
+    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.4, "tp_ratio": 0.5, "max_orders": 7},
+    "M15": {"grid_factor": 0.40, "sl_ratio": 0.5, "tp_ratio": 0.7, "max_orders": 6},
+    "H1":  {"grid_factor": 0.50, "sl_ratio": 0.7, "tp_ratio": 1.0, "max_orders": 5},
 }
 
 @router.post("/plan", response_model=ScalpPlanResponse)
@@ -95,41 +95,35 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     # Price position in daily range (0=bottom, 1=top)
     pos_in_range = (mid - request.daily_low) / daily_range if daily_range > 0 else 0.5
     
-    # Get TF multiplier
-    tf = TF_MULTIPLIERS.get(request.timeframe, TF_MULTIPLIERS["M5"])
+    # Get HFT multiplier
+    tf = HFT.get(request.timeframe, HFT["M5"])
     
     # Estimate ATR for the timeframe
-    atr_estimate = daily_range * 0.15 * tf["grid"]
+    atr_estimate = daily_range * 0.15 * tf["grid_factor"]
     if request.timeframe == "M1":  atr_estimate = daily_range * 0.03
-    elif request.timeframe == "M5":  atr_estimate = daily_range * 0.08
-    elif request.timeframe == "M15": atr_estimate = daily_range * 0.12
-    elif request.timeframe == "H1":  atr_estimate = daily_range * 0.20
+    elif request.timeframe == "M5":  atr_estimate = daily_range * 0.06
+    elif request.timeframe == "M15": atr_estimate = daily_range * 0.10
+    elif request.timeframe == "H1":  atr_estimate = daily_range * 0.18
     
-    # === STEP 3: SIGNAL GENERATION ===
-    signal = "HOLD"
-    confidence = 0.5
-    risk_score = 0.5
+    # === STEP 3: SIGNAL GENERATION (HFT - always trade) ===
+    signal = "BUY"  # Default: always deploy grid
+    confidence = 0.6
+    risk_score = 0.30
     
-    if spread_pct < 0.15:  # Spread must be reasonable
-        if pos_in_range < 0.30:
+    # Adjust bias based on price position
+    if spread_pct < 0.15:
+        if pos_in_range < 0.35:
             signal = "BUY"
-            confidence = max(0.50, 0.80 - pos_in_range - volatility * 10)
-            risk_score = 0.25 + volatility * 15
-        elif pos_in_range > 0.70:
-            signal = "SELL"
-            confidence = max(0.50, pos_in_range - 0.20 - volatility * 10)
-            risk_score = 0.25 + volatility * 15
-        elif pos_in_range < 0.45:
-            signal = "BUY"
+            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.15) * 2)
+        elif pos_in_range > 0.65:
+            signal = "SELL"  
+            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.85) * 2)
+        else:
+            signal = "BUY"  # HFT: always trade, even middle
             confidence = 0.55
-            risk_score = 0.35
-        elif pos_in_range > 0.55:
-            signal = "SELL"
-            confidence = 0.55
-            risk_score = 0.35
+            risk_score = 0.25
     else:
-        risk_score = 0.70
-        confidence = 0.25
+        risk_score = 0.60  # Wider spread = higher risk but still trade
     
     # Adjust with news sentiment
     if signal == "BUY" and news_sentiment > 0.2:    confidence = min(0.95, confidence + 0.1)
@@ -141,72 +135,61 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     confidence = max(0.10, min(0.95, confidence))
     risk_score = max(0.10, min(0.95, risk_score))
     
-    # === STEP 4: RISK ENGINE ===
-    BASE_RISK_PCT = 0.02  # 2% base risk per trade
-    RISK_REWARD = 2.0
-    
-    # Risk per trade in dollars
-    risk_amount = request.account_balance * BASE_RISK_PCT * news_multiplier
-    
-    # Dynamic SL distance (in price)
-    # SL = ATR × volatility_mult × news_mult
-    vol_mult = 1.0 + volatility * 30  # Higher vol → wider stops
-    sl_distance_price = atr_estimate * tf["sl"] * vol_mult
-    
-    # Ensure minimum SL distance (broker safe)
-    min_sl = mid * 0.0005  # 0.05% minimum
+    # === STEP 4: RISK ENGINE (HFT: tight stops, fast profit) ===
+    # Dynamic SL based on ATR - tight for HFT
+    vol_mult = 1.0 + volatility * 15
+    sl_distance_price = atr_estimate * tf["sl_ratio"] * vol_mult
+    min_sl = mid * 0.0003  # 0.03% minimum (tighter for HFT)
     sl_distance_price = max(min_sl, sl_distance_price)
     
-    # Dynamic TP distance (in price)
-    tp_distance_price = sl_distance_price * RISK_REWARD * tf["tp"]
+    # Dynamic TP - even tighter for fast scalping
+    tp_multiplier = tf["tp_ratio"]  # Already very tight for HFT
+    tp_distance_price = sl_distance_price * tp_multiplier
     
     # Convert to points for MQ5
     point = 0.00001 if "EUR" in request.symbol.upper() or "GBP" in request.symbol.upper() else 0.01
     sl_pts = sl_distance_price / point
     tp_pts = tp_distance_price / point
     
+    # HFT: clamp for safety
+    sl_pts = max(20, min(200, sl_pts))
+    tp_pts = max(15, min(150, tp_pts))
+    
     # === STEP 5: LOT SIZE CALCULATION ===
-    # pip_value: EURUSD 0.01 lot = $0.01 per pip (point*10)
-    pip_size = point * 10
-    sl_pips = sl_distance_price / pip_size
+    # HFT mode: always 0.01 per position, many positions simultaneously
+    # Risk managed by stop loss per position, not total account%
     
-    if sl_pips > 0:
-        pip_value_per_01_lot = 0.01  # $0.01 per pip for 0.01 lot
-        target_lot = (risk_amount / sl_pips) / pip_value_per_01_lot * 0.01
-    else:
-        target_lot = 0.01
+    # Fixed micro lot for HFT (profit per trade is small, volume makes it up)
+    target_lot = 0.01
     
-    target_lot = max(0.01, min(0.15, round(target_lot / 0.01) * 0.01))
+    # Safety cap
+    if request.account_balance <= 100:  target_lot = 0.01
+    elif request.account_balance <= 500: target_lot = 0.02
+    elif request.account_balance <= 2000: target_lot = 0.03
+    else: target_lot = 0.05
     
-    # Safety cap based on account size (margin protection)
-    if request.account_balance <= 100:  target_lot = min(target_lot, 0.02)
-    elif request.account_balance <= 500: target_lot = min(target_lot, 0.05)
-    elif request.account_balance <= 2000: target_lot = min(target_lot, 0.10)
-    
-    # === STEP 6: GRID CALCULATOR ===
-    # Grid spacing = ATR × 0.5 for M1/M5, ATR × 0.8 for M15, ATR × 1.0 for H1
-    grid_mult = 0.4 + 0.2 * (["M1","M5","M15","H1"].index(request.timeframe) if request.timeframe in ["M1","M5","M15","H1"] else 1)
-    grid_spacing_price = atr_estimate * grid_mult
+    # === STEP 5: GRID CALCULATOR (HFT: many tight orders) ===
+    # Grid spacing = ATR × tiny factor for HFT
+    grid_spacing_price = atr_estimate * tf["grid_factor"]
     grid_spacing_pts = int(grid_spacing_price / point)
-    grid_spacing_pts = max(15, min(500, grid_spacing_pts))
+    grid_spacing_pts = max(10, min(200, grid_spacing_pts))
     
-    # Order count based on volatility and confidence
-    base_orders = 2
-    if volatility > 0.008: base_orders = 3  # More orders in high vol
-    if volatility < 0.003: base_orders = 1  # Fewer in low vol
-    if confidence > 0.7:   base_orders += 1  # More when confident
-    if news_caution:       base_orders = max(1, base_orders - 1)  # Fewer during news
+    # Many orders per side (HFT grid)
+    max_orders = tf["max_orders"]
+    base_orders = max(3, max_orders - 2)  # Minimum 3 per side
+    if volatility > 0.006: base_orders = max_orders  # Max orders in high vol
+    if news_caution: base_orders = max(2, base_orders - 3)  # Reduce during news
     
     buy_orders = base_orders
     sell_orders = base_orders
     
-    # Bias based on signal
+    # Bias based on signal direction
     if signal == "BUY":
-        buy_orders = min(5, base_orders + 1)
-        sell_orders = max(1, base_orders - 1)
+        buy_orders = min(max_orders, base_orders + 2)
+        sell_orders = max(2, base_orders - 1)
     elif signal == "SELL":
-        sell_orders = min(5, base_orders + 1)
-        buy_orders = max(1, base_orders - 1)
+        sell_orders = min(max_orders, base_orders + 2)
+        buy_orders = max(2, base_orders - 1)
     
     # Risk level label
     if risk_score < 0.35: risk_level = "LOW"

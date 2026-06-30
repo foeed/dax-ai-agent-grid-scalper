@@ -36,7 +36,7 @@ struct ScalpPlan
 //+------------------------------------------------------------------+
 input group "--- Backend ---"
 input string   InpBackendURL      = "http://127.0.0.1:8000";
-input int      InpUpdateSec       = 10;
+input int      InpUpdateSec       = 3;     // Update every seconds (HFT)
 input int      InpRequestTimeout  = 5000;
 
 input group "--- Risk ---"
@@ -112,24 +112,23 @@ void OnTick()
    
    // Dashboard
    Comment(
-      "══════════════════════════════\n",
-      " DAX V2 AI SCALPER v3.0\n",
-      "══════════════════════════════\n",
+      "══════════════════════════════════\n",
+      " DAX V2 HFT SCALPER v3.0\n",
+      "══════════════════════════════════\n",
       " Bal: $", DoubleToString(bal,2),
-      " | Eq: $", DoubleToString(eq,2),
       " | P/L: $", DoubleToString(eq-m_start_balance,2), "\n",
-      " Sig: ", m_plan.signal,
-      " | Risk: ", DoubleToString(m_plan.risk_score*100,0), "%\n",
-      " Lot: ", DoubleToString(m_plan.lot_size,2),
-      " | Grid: ", IntegerToString(m_plan.grid_pts), "pts\n",
-      " SL: ", IntegerToString(m_plan.sl_pts),
-      " | TP: ", IntegerToString(m_plan.tp_pts), "pts\n",
-      " Buy:", IntegerToString(m_plan.buy_orders),
-      " Sell:", IntegerToString(m_plan.sell_orders),
+      " Pos: ", CountPositions(),
+      " | Orders: ", CountOrders(),
+      " | ", m_plan.signal, "\n",
+      " Lot:", DoubleToString(m_plan.lot_size,2),
+      " Grid:", IntegerToString(m_plan.grid_pts),"pts",
+      " SL:", IntegerToString(m_plan.sl_pts),
+      " TP:", IntegerToString(m_plan.tp_pts),"\n",
+      " BuyLim:", IntegerToString(m_plan.buy_orders),
+      " SellLim:", IntegerToString(m_plan.sell_orders),
       " | ", m_plan.risk_level, "\n",
-      " News: ", m_plan.news_caution ? "CAUTION" : "OK",
-      " | ", m_plan.reasoning, "\n",
-      "══════════════════════════════"
+      " ", m_plan.reasoning, "\n",
+      "══════════════════════════════════"
    );
 }
 
@@ -196,21 +195,21 @@ void ManageGrid()
    int live = CountPositions();
    int pend = CountOrders();
    
-   // Cancel opposite grid when position exists
+   // Cancel opposite grid when position exists (save one direction)
    if(live > 0 && pend > 0) CancelOpposite();
    
-   // Build grid when flat
+   // HFT: Always keep grid open
    if(live == 0)
    {
-      if(pend == 0 && m_plan.signal != "HOLD")
-         BuildGrid();
-      else if(pend > 0)
+      if(pend == 0)
+         BuildGrid();  // Always deploy
+      else
       {
-         // Check if orders are stale (price moved too far)
+         // Stale check
          double mid = (m_bid + m_ask) / 2;
          double nearest = GetNearestOrder();
          double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-         if(nearest > 0 && MathAbs(nearest - mid) > m_plan.grid_pts * 3 * point)
+         if(nearest > 0 && MathAbs(nearest - mid) > m_plan.grid_pts * 4 * point)
          {
             PurgeAll();
             BuildGrid();
