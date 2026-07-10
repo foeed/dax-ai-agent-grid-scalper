@@ -292,12 +292,71 @@ void ManageGrid()
 }
 
 //+------------------------------------------------------------------+
+//| Calculate optimal lot size based on available margin              |
+//+------------------------------------------------------------------+
+double CalcLotByMargin()
+{
+   double balance = m_account.Balance();
+   double free_margin = m_account.FreeMargin();
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lot_step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   // Need margin for max possible orders (both sides) to be safe
+   int max_total = m_buy_orders + m_sell_orders;
+   if(max_total < 1) max_total = 1;
+
+   // Check margin required for 0.01 lot
+   double test_lot = min_lot;
+   double margin_1lot = 0;
+   if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, test_lot, m_ask, margin_1lot))
+   {
+      // Fallback: estimate margin as price * lot * contract_size / leverage
+      long leverage = m_account.Leverage();
+      double contract = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(leverage <= 0) leverage = 100;
+      margin_1lot = (m_ask * test_lot * contract) / leverage;
+   }
+
+   if(margin_1lot <= 0) return min_lot;
+
+   // Reserve 20% of free margin for safety (spread, slippage)
+   double safe_margin = free_margin * 0.80;
+   double margin_per_order = margin_1lot / test_lot;  // margin per 1.0 lot
+
+   // Max lot that fits all orders
+   double max_lot_by_margin = safe_margin / (margin_per_order * max_total);
+   max_lot_by_margin = MathFloor(max_lot_by_margin / lot_step) * lot_step;
+
+   // Clamp
+   if(max_lot_by_margin < min_lot)
+   {
+      // Can't afford all orders - try with just 1 order
+      max_lot_by_margin = safe_margin / margin_per_order;
+      max_lot_by_margin = MathFloor(max_lot_by_margin / lot_step) * lot_step;
+   }
+   if(max_lot_by_margin < min_lot) return 0;  // Can't afford anything
+   if(max_lot_by_margin > max_lot) max_lot_by_margin = max_lot;
+
+   // Also respect user's max lot setting
+   if(max_lot_by_margin > InpLotSize) max_lot_by_margin = InpLotSize;
+
+   return NormalizeDouble(max_lot_by_margin, 2);
+}
+
+//+------------------------------------------------------------------+
 void BuildGrid()
 {
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double lot = InpLotSize;
+   double lot = CalcLotByMargin();
 
-   if(lot < 0.01 || m_grid_pts < 5 || m_sl_pts < 10 || m_tp_pts < 10) return;
+   if(lot < 0.01 || m_grid_pts < 5 || m_sl_pts < 10 || m_tp_pts < 10)
+   {
+      Print("SKIP GRID: lot=", DoubleToString(lot,2), " grid=", m_grid_pts,
+            " sl=", m_sl_pts, " tp=", m_tp_pts,
+            " free_margin=", DoubleToString(m_account.FreeMargin(),2));
+      return;
+   }
 
    // Check trading allowed
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
@@ -326,6 +385,17 @@ void BuildGrid()
       double tp = NormalizeDouble(entry + m_tp_pts * point, _Digits);
 
       if((m_bid - entry) / point < min_dist) continue;
+
+      // Check margin before placing
+      double margin_needed = 0;
+      if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, lot, entry, margin_needed))
+         margin_needed = lot * m_ask * 100 / m_account.Leverage();
+      if(margin_needed > m_account.FreeMargin() * 0.90)
+      {
+         Print("BUY# ", i, " SKIP: need $", DoubleToString(margin_needed,2),
+               " free=$", DoubleToString(m_account.FreeMargin(),2));
+         continue;
+      }
 
       bool ok = m_trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy);
       if(!ok)
@@ -360,6 +430,17 @@ void BuildGrid()
 
       if((entry - m_ask) / point < min_dist) continue;
 
+      // Check margin before placing
+      double margin_needed = 0;
+      if(!OrderCalcMargin(ORDER_TYPE_SELL, _Symbol, lot, entry, margin_needed))
+         margin_needed = lot * m_ask * 100 / m_account.Leverage();
+      if(margin_needed > m_account.FreeMargin() * 0.90)
+      {
+         Print("SELL# ", i, " SKIP: need $", DoubleToString(margin_needed,2),
+               " free=$", DoubleToString(m_account.FreeMargin(),2));
+         continue;
+      }
+
       bool ok = m_trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy);
       if(!ok)
       {
@@ -384,7 +465,9 @@ void BuildGrid()
    }
 
    Print("GRID: ", m_signal, " placed=", placed, " failed=", failed,
-         " SL=", m_sl_pts, " TP=", m_tp_pts, " Grid=", m_grid_pts);
+         " lot=", DoubleToString(lot,2),
+         " SL=", m_sl_pts, " TP=", m_tp_pts, " Grid=", m_grid_pts,
+         " free=$", DoubleToString(m_account.FreeMargin(),2));
 }
 
 //+------------------------------------------------------------------+
