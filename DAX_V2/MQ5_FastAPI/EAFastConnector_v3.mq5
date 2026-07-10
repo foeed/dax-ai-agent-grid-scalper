@@ -219,8 +219,11 @@ bool FetchPlan()
          if(m_plan.sl_pts < 10)  m_plan.sl_pts = 30;
          if(m_plan.tp_pts < 10)  m_plan.tp_pts = 20;
          if(m_plan.grid_pts < 5) m_plan.grid_pts = 15;
-         if(m_plan.buy_orders < 1)  m_plan.buy_orders = 1;
-         if(m_plan.sell_orders < 1) m_plan.sell_orders = 1;
+          if(m_plan.signal != "HOLD")
+          {
+             if(m_plan.buy_orders < 1)  m_plan.buy_orders = 1;
+             if(m_plan.sell_orders < 1) m_plan.sell_orders = 1;
+          }
 
          Print("PLAN: ", m_plan.signal, " Lot:", DoubleToString(m_plan.lot_size,2),
                " SL:", m_plan.sl_pts, " TP:", m_plan.tp_pts,
