@@ -42,12 +42,12 @@ class ScalpPlanResponse(BaseModel):
     reasoning: str
 
 # Timeframe multipliers for volatility/scaling
-# HFT Timeline multipliers - tight, fast, many
+# HFT Timeline multipliers - aggressive, max orders, min distance
 HFT = {
-    "M1":  {"grid_factor": 0.25, "sl_ratio": 0.3, "tp_ratio": 0.4, "max_orders": 8},
-    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.4, "tp_ratio": 0.5, "max_orders": 7},
-    "M15": {"grid_factor": 0.40, "sl_ratio": 0.5, "tp_ratio": 0.7, "max_orders": 6},
-    "H1":  {"grid_factor": 0.50, "sl_ratio": 0.7, "tp_ratio": 1.0, "max_orders": 5},
+    "M1":  {"grid_factor": 0.20, "sl_ratio": 0.5, "tp_ratio": 1.5, "max_orders": 10},
+    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.6, "tp_ratio": 1.5, "max_orders": 8},
+    "M15": {"grid_factor": 0.35, "sl_ratio": 0.7, "tp_ratio": 1.5, "max_orders": 6},
+    "H1":  {"grid_factor": 0.45, "sl_ratio": 0.8, "tp_ratio": 1.5, "max_orders": 5},
 }
 
 @router.post("/plan", response_model=ScalpPlanResponse)
@@ -86,11 +86,15 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     mid = (request.bid + request.ask) / 2 if request.ask > 0 else 0
     if mid <= 0: mid = 1.0
     
+    # Detect symbol type and point value
+    is_gold = "XAU" in request.symbol.upper() or "GOLD" in request.symbol.upper()
+    point = 0.01 if is_gold else 0.00001
+    
     daily_range = request.daily_high - request.daily_low
     if daily_range <= 0: daily_range = mid * 0.005
     
     volatility = daily_range / mid if mid > 0 else 0.005
-    spread_pct = (request.spread * 0.00001) / mid * 100 if mid > 0 else 0
+    spread_pct = (request.spread * point) / mid * 100 if mid > 0 else 0
     
     # Price position in daily range (0=bottom, 1=top)
     pos_in_range = (mid - request.daily_low) / daily_range if daily_range > 0 else 0.5
@@ -119,11 +123,13 @@ async def get_scalp_plan(request: ScalpPlanRequest):
             signal = "SELL"  
             confidence = max(0.55, 0.85 - abs(pos_in_range - 0.85) * 2)
         else:
-            signal = "BUY"  # HFT: always trade, even middle
-            confidence = 0.55
+            signal = "HOLD"  # No trade in middle range - choppy zone
+            confidence = 0.40
             risk_score = 0.25
     else:
-        risk_score = 0.60  # Wider spread = higher risk but still trade
+        signal = "HOLD"  # Wide spread = no trade
+        confidence = 0.30
+        risk_score = 0.60
     
     # Adjust with news sentiment
     if signal == "BUY" and news_sentiment > 0.2:    confidence = min(0.95, confidence + 0.1)
@@ -147,13 +153,21 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     tp_distance_price = sl_distance_price * tp_multiplier
     
     # Convert to points for MQ5
-    point = 0.00001 if "EUR" in request.symbol.upper() or "GBP" in request.symbol.upper() else 0.01
     sl_pts = sl_distance_price / point
     tp_pts = tp_distance_price / point
     
-    # HFT: clamp for safety
-    sl_pts = max(20, min(200, sl_pts))
-    tp_pts = max(15, min(150, tp_pts))
+    # HFT: clamp for safety - wider range for gold due to larger price movements
+    if is_gold:
+        sl_pts = max(200, min(500, sl_pts))
+        tp_pts = max(150, min(750, tp_pts))
+        # Ensure R:R ratio holds after clamping (tp must be at least sl * ratio)
+        tp_pts = max(tp_pts, int(sl_pts * tf["tp_ratio"]))
+        tp_pts = min(750, tp_pts)  # Re-cap
+    else:
+        sl_pts = max(20, min(200, sl_pts))
+        tp_pts = max(15, min(300, tp_pts))
+        tp_pts = max(tp_pts, int(sl_pts * tf["tp_ratio"]))
+        tp_pts = min(300, tp_pts)
     
     # === STEP 5: LOT SIZE CALCULATION ===
     # HFT mode: always 0.01 per position, many positions simultaneously
@@ -162,34 +176,66 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     # Fixed micro lot for HFT (profit per trade is small, volume makes it up)
     target_lot = 0.01
     
-    # Safety cap
-    if request.account_balance <= 100:  target_lot = 0.01
-    elif request.account_balance <= 500: target_lot = 0.02
-    elif request.account_balance <= 2000: target_lot = 0.03
-    else: target_lot = 0.05
+    # Safety cap - gold needs smaller lots due to higher margin
+    if is_gold:
+        if request.account_balance <= 100:  target_lot = 0.01
+        elif request.account_balance <= 500: target_lot = 0.01
+        elif request.account_balance <= 2000: target_lot = 0.02
+        else: target_lot = 0.02
+    else:
+        if request.account_balance <= 100:  target_lot = 0.01
+        elif request.account_balance <= 500: target_lot = 0.02
+        elif request.account_balance <= 2000: target_lot = 0.03
+        else: target_lot = 0.05
     
-    # === STEP 5: GRID CALCULATOR (HFT: many tight orders) ===
-    # Grid spacing = ATR × tiny factor for HFT
+    # === STEP 5: GRID CALCULATOR (Aggressive HFT: max orders, min distance) ===
+    # Minimum grid spacing = 5 points for forex, scaled for gold
+    min_grid_pts = 20 if is_gold else 5
+    
+    # Grid spacing: minimum possible while keeping orders valid
     grid_spacing_price = atr_estimate * tf["grid_factor"]
     grid_spacing_pts = int(grid_spacing_price / point)
-    grid_spacing_pts = max(10, min(200, grid_spacing_pts))
+    grid_spacing_pts = max(min_grid_pts, min(100, grid_spacing_pts))
     
-    # Many orders per side (HFT grid)
-    max_orders = tf["max_orders"]
-    base_orders = max(3, max_orders - 2)  # Minimum 3 per side
-    if volatility > 0.006: base_orders = max_orders  # Max orders in high vol
-    if news_caution: base_orders = max(2, base_orders - 3)  # Reduce during news
+    # Aggressive: calculate MAX orders based on 2% risk per side
+    # Each position: 0.01 lot
+    # EURUSD: 10 points = 1 pip, $0.01 per pip for 0.01 lot
+    # XAUUSD: 1 point = 1 pip, $0.01 per point for 0.01 lot
+    if is_gold:
+        risk_per_position = sl_pts * 0.01
+        max_orders_cap = 3  # Gold: max 3 orders per side
+    else:
+        risk_per_position = 0.01 * (sl_pts / 10.0)  # $0.033 risk at 33pt SL
+        max_orders_cap = min(tf["max_orders"], 10)  # Forex: max 10 orders per side (broker limit)
+    
+    # 2% of balance = max risk per side
+    if request.account_balance <= 0: request.account_balance = 40
+    max_risk_per_side = request.account_balance * 0.02  # 2% per side
+    
+    if risk_per_position > 0:
+        max_by_risk = int(max_risk_per_side / risk_per_position)
+    else:
+        max_by_risk = 3
+    
+    # Cap at max allowed and by risk
+    max_orders = min(max_orders_cap, max_by_risk)
+    base_orders = max(2, max_orders)
+    
+    if news_caution: base_orders = max(1, base_orders // 2)
     
     buy_orders = base_orders
     sell_orders = base_orders
     
-    # Bias based on signal direction
+    # Directional: only trade in signal direction, no counter-trend
     if signal == "BUY":
-        buy_orders = min(max_orders, base_orders + 2)
-        sell_orders = max(2, base_orders - 1)
+        buy_orders = max_orders
+        sell_orders = 0
     elif signal == "SELL":
-        sell_orders = min(max_orders, base_orders + 2)
-        buy_orders = max(2, base_orders - 1)
+        sell_orders = max_orders
+        buy_orders = 0
+    else:
+        buy_orders = 0
+        sell_orders = 0
     
     # Risk level label
     if risk_score < 0.35: risk_level = "LOW"

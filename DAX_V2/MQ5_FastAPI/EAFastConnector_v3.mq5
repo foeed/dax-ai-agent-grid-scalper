@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "DAX V2 AI Trading System"
 #property link      ""
-#property version   "3.00"
+#property version   "3.12"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -58,6 +58,10 @@ int            m_day = -1;
 bool           m_halted;
 datetime       m_last_update;
 double         m_bid, m_ask, m_spread;
+ENUM_ORDER_TYPE_FILLING m_fill_policy;
+bool           m_market_mode;           // true = broker blocks pending orders, use market
+int            m_consecutive_failures;  // track BuildGrid failures for auto-detect
+datetime       m_last_grid_attempt;     // rate-limit grid builds
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -66,9 +70,36 @@ int OnInit()
    m_start_balance = m_account.Balance();
    m_halted = false;
    m_last_update = 0;
-   m_plan.signal = "HOLD";
-   Print("DAX V2 AI Scalper v3.0 | Balance: $", DoubleToString(m_start_balance,2),
-         " | TF: ", EnumToString(Period()));
+   m_day = -1;
+   m_market_mode = false;
+   m_consecutive_failures = 0;
+   m_last_grid_attempt = 0;
+
+   // Detect broker fill policy - use RETURN first (most compatible for pending limit orders)
+   // RETURN works universally; FOK/IOC only needed for some market orders
+   long fill_policy = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+   m_fill_policy = ORDER_FILLING_RETURN;
+   m_trade.SetTypeFilling(m_fill_policy);
+
+   // Initialize plan with safe defaults
+   m_plan.signal       = "HOLD";
+   m_plan.lot_size     = 0.01;
+   m_plan.sl_pts       = 50;
+   m_plan.tp_pts       = 30;
+   m_plan.grid_pts     = 20;
+   m_plan.buy_orders   = 2;
+   m_plan.sell_orders  = 2;
+   m_plan.risk_score   = 0.5;
+   m_plan.confidence   = 0.5;
+   m_plan.risk_level   = "MEDIUM";
+   m_plan.news_caution = false;
+   m_plan.reasoning    = "INIT";
+
+   Print("DAX V2 AI Scalper v3.12 | Balance: $", DoubleToString(m_start_balance,2),
+         " | Magic: ", InpMagicNumber,
+         " | TF: ", EnumToString(Period()),
+         " | Fill: RETURN (auto)",
+         " | Backend: ", InpBackendURL);
    return(INIT_SUCCEEDED);
 }
 
@@ -113,7 +144,7 @@ void OnTick()
    // Dashboard
    Comment(
       "══════════════════════════════════\n",
-      " DAX V2 HFT SCALPER v3.0\n",
+      " DAX V2 HFT SCALPER v3.12\n",
       "══════════════════════════════════\n",
       " Bal: $", DoubleToString(bal,2),
       " | P/L: $", DoubleToString(eq-m_start_balance,2), "\n",
@@ -126,7 +157,8 @@ void OnTick()
       " TP:", IntegerToString(m_plan.tp_pts),"\n",
       " BuyLim:", IntegerToString(m_plan.buy_orders),
       " SellLim:", IntegerToString(m_plan.sell_orders),
-      " | ", m_plan.risk_level, "\n",
+      " | ", m_plan.risk_level,
+      m_market_mode ? " | MARKET MODE" : "", "\n",
       " ", m_plan.reasoning, "\n",
       "══════════════════════════════════"
    );
@@ -169,21 +201,34 @@ bool FetchPlan()
       if(res >= 200 && res < 300 && ArraySize(result) > 10)
       {
          string r = CharArrayToString(result);
-         m_plan.signal      = Js(r, "signal");
-         m_plan.lot_size    = Jd(r, "lot_size");
-         m_plan.sl_pts      = (int)Jd(r, "sl_distance_pts");
-         m_plan.tp_pts      = (int)Jd(r, "tp_distance_pts");
-         m_plan.grid_pts    = (int)Jd(r, "grid_spacing_pts");
-         m_plan.buy_orders  = (int)Jd(r, "buy_orders");
-         m_plan.sell_orders = (int)Jd(r, "sell_orders");
-         m_plan.risk_score  = Jd(r, "risk_score");
-         m_plan.confidence  = Jd(r, "confidence");
-         m_plan.risk_level  = Js(r, "risk_level");
-         m_plan.news_caution= StringFind(r, "\"news_caution\":true") >= 0;
-         m_plan.reasoning   = Js(r, "reasoning");
-         if(m_plan.lot_size <= 0 || m_plan.lot_size > 1) m_plan.lot_size = 0.01;
+         m_plan.signal       = Js(r, "signal");
+         m_plan.lot_size     = Jd(r, "lot_size");
+         m_plan.sl_pts       = (int)Jd(r, "sl_distance_pts");
+         m_plan.tp_pts       = (int)Jd(r, "tp_distance_pts");
+         m_plan.grid_pts     = (int)Jd(r, "grid_spacing_pts");
+         m_plan.buy_orders   = (int)Jd(r, "buy_orders");
+         m_plan.sell_orders  = (int)Jd(r, "sell_orders");
+         m_plan.risk_score   = Jd(r, "risk_score");
+         m_plan.confidence   = Jd(r, "confidence");
+         m_plan.risk_level   = Js(r, "risk_level");
+         m_plan.news_caution = StringFind(r, "\"news_caution\":true") >= 0;
+         m_plan.reasoning    = Js(r, "reasoning");
+
+         // Safety clamp
+         if(m_plan.lot_size <= 0 || m_plan.lot_size > 0.1) m_plan.lot_size = 0.01;
+         if(m_plan.sl_pts < 10)  m_plan.sl_pts = 30;
+         if(m_plan.tp_pts < 10)  m_plan.tp_pts = 20;
+         if(m_plan.grid_pts < 5) m_plan.grid_pts = 15;
+         if(m_plan.buy_orders < 1)  m_plan.buy_orders = 1;
+         if(m_plan.sell_orders < 1) m_plan.sell_orders = 1;
+
+         Print("PLAN: ", m_plan.signal, " Lot:", DoubleToString(m_plan.lot_size,2),
+               " SL:", m_plan.sl_pts, " TP:", m_plan.tp_pts,
+               " Grid:", m_plan.grid_pts, " Buy:", m_plan.buy_orders,
+               " Sell:", m_plan.sell_orders, " Risk:", m_plan.risk_level);
          return true;
       }
+      Print("BACKEND FAIL res=", res, " attempt=", a+1);
       if(a < 1) Sleep(500);
    }
    return false;
@@ -198,20 +243,42 @@ void ManageGrid()
    // Cancel opposite grid when position exists (save one direction)
    if(live > 0 && pend > 0) CancelOpposite();
    
-   // HFT: Always keep grid open
+   // Only build grid if we have valid plan data
+   bool valid = m_plan.lot_size >= 0.01 && m_plan.grid_pts >= 5 && m_plan.sl_pts >= 10;
+   if(!valid) return;
+
+   // Rate limit: don't attempt grid more than once per 3 seconds when failing
+   int cooldown = m_market_mode ? 10 : 3;
+   if((int)(TimeCurrent() - m_last_grid_attempt) < cooldown) return;
+
+   // Market mode: FTMO fallback - use market orders instead of pending
+   if(m_market_mode)
+   {
+      if(live == 0)
+      {
+         m_last_grid_attempt = TimeCurrent();
+         BuildMarketOrders();
+      }
+      return;
+   }
+
+   // Pending order mode
    if(live == 0)
    {
       if(pend == 0)
-         BuildGrid();  // Always deploy
+      {
+         m_last_grid_attempt = TimeCurrent();
+         BuildGrid();
+      }
       else
       {
-         // Stale check
          double mid = (m_bid + m_ask) / 2;
          double nearest = GetNearestOrder();
          double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
          if(nearest > 0 && MathAbs(nearest - mid) > m_plan.grid_pts * 4 * point)
          {
             PurgeAll();
+            m_last_grid_attempt = TimeCurrent();
             BuildGrid();
          }
       }
@@ -224,24 +291,200 @@ void BuildGrid()
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    double lot = m_plan.lot_size;
    int dist = m_plan.grid_pts;
-   
+
+   // Validate - don't build grid with bad data
+   if(lot < 0.01 || dist < 5 || m_plan.sl_pts < 10 || m_plan.tp_pts < 10)
+   {
+      Print("SKIP GRID: bad data lot=", lot, " dist=", dist,
+            " sl=", m_plan.sl_pts, " tp=", m_plan.tp_pts);
+      return;
+   }
+
+   // Check broker allows trading
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+   {
+      Print("BLOCKED: AutoTrading is OFF - enable it in MT5 toolbar");
+      return;
+   }
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+   {
+      Print("BLOCKED: EA algo trading is OFF - enable in EA properties");
+      return;
+   }
+
+   long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long freeze_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   int min_dist = (int)MathMax(stops_level, freeze_level) + 5;
+
+   int placed = 0;
+   int failed = 0;
+
    // Buy Limits below bid
    for(int i = 1; i <= m_plan.buy_orders; i++)
    {
-      double entry = m_bid - dist * i * point;
-      double sl = entry - m_plan.sl_pts * point;
-      double tp = entry + m_plan.tp_pts * point;
-      m_trade.BuyLimit(lot, entry, _Symbol, sl, tp);
+      double entry = NormalizeDouble(m_bid - dist * i * point, _Digits);
+      double sl = NormalizeDouble(entry - m_plan.sl_pts * point, _Digits);
+      double tp = NormalizeDouble(entry + m_plan.tp_pts * point, _Digits);
+
+      if((m_bid - entry) / point < min_dist) continue;
+
+      bool ok = m_trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy);
+      if(!ok)
+      {
+         ulong err = m_trade.ResultRetcode();
+         string comment = m_trade.ResultComment();
+         Print("BUY# ", i, " FAIL retcode=", err, " [", comment, "] fill=", EnumToString(m_fill_policy));
+         // 10017 = TRADE_RETCODE_TRADE_DISABLED - broker blocks pending orders
+         if(err == 10017)
+         {
+            m_market_mode = true;
+            Print("!!! PENDING BLOCKED (10017) - switching to MARKET ORDER MODE");
+            return;
+         }
+         // Try other fill modes on err=4756 (invalid fill)
+         if(err == 4756)
+         {
+            ENUM_ORDER_TYPE_FILLING modes[3] = {ORDER_FILLING_RETURN, ORDER_FILLING_FOK, ORDER_FILLING_IOC};
+            for(int f = 0; f < 3; f++)
+            {
+               if(modes[f] == m_fill_policy) continue;
+               m_fill_policy = modes[f];
+               m_trade.SetTypeFilling(m_fill_policy);
+               if(m_trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy))
+               { ok = true; Print("BUY# ", i, " RETRY OK fill=", EnumToString(m_fill_policy)); break; }
+            }
+         }
+      }
+      if(ok) placed++; else failed++;
+      Sleep(50);
    }
    
    // Sell Limits above ask
    for(int i = 1; i <= m_plan.sell_orders; i++)
    {
-      double entry = m_ask + dist * i * point;
-      double sl = entry + m_plan.sl_pts * point;
-      double tp = entry - m_plan.tp_pts * point;
-      m_trade.SellLimit(lot, entry, _Symbol, sl, tp);
+      double entry = NormalizeDouble(m_ask + dist * i * point, _Digits);
+      double sl = NormalizeDouble(entry + m_plan.sl_pts * point, _Digits);
+      double tp = NormalizeDouble(entry - m_plan.tp_pts * point, _Digits);
+
+      if((entry - m_ask) / point < min_dist) continue;
+
+      bool ok = m_trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy);
+      if(!ok)
+      {
+         ulong err = m_trade.ResultRetcode();
+         string comment = m_trade.ResultComment();
+         Print("SELL# ", i, " FAIL retcode=", err, " [", comment, "] fill=", EnumToString(m_fill_policy));
+         // 10017 = TRADE_RETCODE_TRADE_DISABLED - broker blocks pending orders
+         if(err == 10017)
+         {
+            m_market_mode = true;
+            Print("!!! PENDING BLOCKED (10017) - switching to MARKET ORDER MODE");
+            return;
+         }
+         if(err == 4756)
+         {
+            ENUM_ORDER_TYPE_FILLING modes[3] = {ORDER_FILLING_RETURN, ORDER_FILLING_FOK, ORDER_FILLING_IOC};
+            for(int f = 0; f < 3; f++)
+            {
+               if(modes[f] == m_fill_policy) continue;
+               m_fill_policy = modes[f];
+               m_trade.SetTypeFilling(m_fill_policy);
+               if(m_trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, m_fill_policy))
+               { ok = true; Print("SELL# ", i, " RETRY OK fill=", EnumToString(m_fill_policy)); break; }
+            }
+         }
+      }
+      if(ok) placed++; else failed++;
+      Sleep(50);
    }
+
+   Print("GRID: placed ", placed, " failed ", failed,
+         " (stops=", stops_level, " freeze=", freeze_level, " fill=", EnumToString(m_fill_policy), ")");
+
+   // Auto-detect broker restrictions: if ALL orders failed, track consecutive failures
+   if(placed == 0 && failed > 0)
+   {
+      m_consecutive_failures++;
+      Print("GRID FAIL #", m_consecutive_failures, " - auto-switch to market mode after 3 failures");
+      if(m_consecutive_failures >= 3)
+      {
+         m_market_mode = true;
+         Print("!!! BROKER RESTRICTION DETECTED: pending orders blocked. Switching to MARKET ORDER MODE (FTMO compatible)");
+      }
+   }
+   else
+   {
+      m_consecutive_failures = 0;  // Reset on any success
+   }
+}
+
+//+------------------------------------------------------------------+
+//| BuildMarketOrders - FTMO fallback when pending orders blocked     |
+//| Uses Buy/Sell instead of BuyLimit/SellLimit, max 1 per direction  |
+//+------------------------------------------------------------------+
+void BuildMarketOrders()
+{
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+   {
+      Print("BLOCKED: AutoTrading is OFF - enable it in MT5 toolbar");
+      return;
+   }
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+   {
+      Print("BLOCKED: EA algo trading is OFF - enable in EA properties");
+      return;
+   }
+
+   double lot = m_plan.lot_size;
+   if(lot < 0.01) lot = 0.01;
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+   // Only open if we have no positions
+   if(CountPositions() > 0) return;
+
+   int placed = 0;
+
+   // Buy market order
+   if(m_plan.signal == "BUY" || m_plan.signal == "HOLD")
+   {
+      double sl = NormalizeDouble(m_bid - m_plan.sl_pts * point, _Digits);
+      double tp = NormalizeDouble(m_bid + m_plan.tp_pts * point, _Digits);
+
+      if(m_trade.Buy(lot, _Symbol, 0, sl, tp, "DAX-MKT-BUY"))
+      {
+         Print("MKT BUY OK lot=", DoubleToString(lot,2),
+               " sl=", sl, " tp=", tp,
+               " price=", DoubleToString(m_trade.ResultPrice(), _Digits));
+         placed++;
+      }
+      else
+      {
+         ulong err = m_trade.ResultRetcode();
+         Print("MKT BUY FAIL retcode=", err, " [", m_trade.ResultComment(), "]");
+      }
+   }
+
+   // Sell market order
+   if(m_plan.signal == "SELL" || m_plan.signal == "HOLD")
+   {
+      double sl = NormalizeDouble(m_ask + m_plan.sl_pts * point, _Digits);
+      double tp = NormalizeDouble(m_ask - m_plan.tp_pts * point, _Digits);
+
+      if(m_trade.Sell(lot, _Symbol, 0, sl, tp, "DAX-MKT-SELL"))
+      {
+         Print("MKT SELL OK lot=", DoubleToString(lot,2),
+               " sl=", sl, " tp=", tp,
+               " price=", DoubleToString(m_trade.ResultPrice(), _Digits));
+         placed++;
+      }
+      else
+      {
+         ulong err = m_trade.ResultRetcode();
+         Print("MKT SELL FAIL retcode=", err, " [", m_trade.ResultComment(), "]");
+      }
+   }
+
+   Print("MKT ORDERS: placed ", placed, " (market mode - pending blocked by broker)");
 }
 
 //+------------------------------------------------------------------+
