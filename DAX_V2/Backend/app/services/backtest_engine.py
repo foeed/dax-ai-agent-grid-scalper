@@ -78,7 +78,7 @@ class GridState:
 HFT = {
     "M1":  {"grid_factor": 0.20, "sl_ratio": 0.5, "tp_ratio": 1.5, "max_orders": 10},
     "M5":  {"grid_factor": 0.30, "sl_ratio": 0.6, "tp_ratio": 1.5, "max_orders": 8},
-    "M15": {"grid_factor": 0.35, "sl_ratio": 0.7, "tp_ratio": 1.5, "max_orders": 6},
+    "M15": {"grid_factor": 0.35, "sl_ratio": 0.8, "tp_ratio": 1.8, "max_orders": 2},
     "H1":  {"grid_factor": 0.45, "sl_ratio": 0.8, "tp_ratio": 1.5, "max_orders": 5},
 }
 
@@ -127,12 +127,12 @@ def generate_signal(
     risk_score = 0.30
 
     if spread_pct < 0.15:
-        if pos_in_range < 0.35:
+        if pos_in_range < 0.25:
             signal = "BUY"
-            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.15) * 2)
-        elif pos_in_range > 0.65:
+            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.11) * 2)
+        elif pos_in_range > 0.75:
             signal = "SELL"
-            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.85) * 2)
+            confidence = max(0.55, 0.85 - abs(pos_in_range - 0.89) * 2)
         else:
             signal = "HOLD"  # No trade in middle range - choppy zone
             confidence = 0.40
@@ -146,7 +146,7 @@ def generate_signal(
     risk_score = max(0.10, min(0.95, risk_score))
 
     # SL/TP
-    vol_mult = 1.0 + volatility * 15
+    vol_mult = 1.0 + volatility * 10
     sl_distance_price = atr_estimate * tf["sl_ratio"] * vol_mult
     min_sl = mid * 0.0003
     sl_distance_price = max(min_sl, sl_distance_price)
