@@ -77,7 +77,7 @@ class GridState:
 
 HFT = {
     "M1":  {"grid_factor": 0.20, "sl_ratio": 0.5, "tp_ratio": 1.5, "max_orders": 10},
-    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.6, "tp_ratio": 1.5, "max_orders": 8},
+    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.9, "tp_ratio": 1.4, "max_orders": 2},
     "M15": {"grid_factor": 0.35, "sl_ratio": 0.8, "tp_ratio": 1.8, "max_orders": 2},
     "H1":  {"grid_factor": 0.45, "sl_ratio": 0.8, "tp_ratio": 1.5, "max_orders": 5},
 }
@@ -127,10 +127,10 @@ def generate_signal(
     risk_score = 0.30
 
     if spread_pct < 0.15:
-        if pos_in_range < 0.25:
+        if pos_in_range < 0.30:
             signal = "BUY"
             confidence = max(0.55, 0.85 - abs(pos_in_range - 0.11) * 2)
-        elif pos_in_range > 0.75:
+        elif pos_in_range > 0.65:
             signal = "SELL"
             confidence = max(0.55, 0.85 - abs(pos_in_range - 0.89) * 2)
         else:
@@ -146,7 +146,7 @@ def generate_signal(
     risk_score = max(0.10, min(0.95, risk_score))
 
     # SL/TP
-    vol_mult = 1.0 + volatility * 10
+    vol_mult = 8.0  # Fixed multiplier (optimizer best)
     sl_distance_price = atr_estimate * tf["sl_ratio"] * vol_mult
     min_sl = mid * 0.0003
     sl_distance_price = max(min_sl, sl_distance_price)
@@ -188,7 +188,7 @@ def generate_signal(
 
     if is_gold:
         risk_per_position = sl_pts * 0.01
-        max_orders_cap = 3  # Gold: max 3 orders per side
+        max_orders_cap = 2  # Gold: max 2 orders per side (optimizer best)
     else:
         risk_per_position = 0.01 * (sl_pts / 10.0)
         max_orders_cap = min(tf["max_orders"], 10)
@@ -235,7 +235,7 @@ def build_grid(
     bid: float,
     ask: float,
     bar_index: int,
-    grid_cooldown: int = 15,
+    grid_cooldown: int = 10,
 ):
     """Place pending BuyLimit/SellLimit orders. Matches EA BuildGrid()."""
 
@@ -312,7 +312,7 @@ def simulate_bar(
     spread_pts: float,
     point: float,
     is_gold: bool,
-    grid_cooldown: int = 15,
+    grid_cooldown: int = 10,
 ):
     """Process one bar: fill orders, check SL/TP, trail, maybe rebuild grid."""
 
@@ -502,7 +502,7 @@ def run_backtest(
     timeframe: str = "M5",
     account_balance: float = 10000.0,
     spread_pts: float = 20.0,
-    grid_cooldown: int = 15,
+    grid_cooldown: int = 10,
 ) -> dict:
     """
     Run full backtest on historical bars.

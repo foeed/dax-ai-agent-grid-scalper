@@ -45,7 +45,7 @@ class ScalpPlanResponse(BaseModel):
 # HFT Timeline multipliers - aggressive, max orders, min distance
 HFT = {
     "M1":  {"grid_factor": 0.20, "sl_ratio": 0.5, "tp_ratio": 1.5, "max_orders": 10},
-    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.6, "tp_ratio": 1.5, "max_orders": 8},
+    "M5":  {"grid_factor": 0.30, "sl_ratio": 0.9, "tp_ratio": 1.4, "max_orders": 2},
     "M15": {"grid_factor": 0.35, "sl_ratio": 0.8, "tp_ratio": 1.8, "max_orders": 2},
     "H1":  {"grid_factor": 0.45, "sl_ratio": 0.8, "tp_ratio": 1.5, "max_orders": 5},
 }
@@ -116,10 +116,10 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     
     # Adjust bias based on price position
     if spread_pct < 0.15:
-        if pos_in_range < 0.25:
+        if pos_in_range < 0.30:
             signal = "BUY"
             confidence = max(0.55, 0.85 - abs(pos_in_range - 0.11) * 2)
-        elif pos_in_range > 0.75:
+        elif pos_in_range > 0.65:
             signal = "SELL"  
             confidence = max(0.55, 0.85 - abs(pos_in_range - 0.89) * 2)
         else:
@@ -143,7 +143,7 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     
     # === STEP 4: RISK ENGINE (HFT: tight stops, fast profit) ===
     # Dynamic SL based on ATR - tight for HFT
-    vol_mult = 1.0 + volatility * 10
+    vol_mult = 8.0  # Fixed multiplier (optimizer best)
     sl_distance_price = atr_estimate * tf["sl_ratio"] * vol_mult
     min_sl = mid * 0.0003  # 0.03% minimum (tighter for HFT)
     sl_distance_price = max(min_sl, sl_distance_price)
@@ -203,7 +203,7 @@ async def get_scalp_plan(request: ScalpPlanRequest):
     # XAUUSD: 1 point = 1 pip, $0.01 per point for 0.01 lot
     if is_gold:
         risk_per_position = sl_pts * 0.01
-        max_orders_cap = 3  # Gold: max 3 orders per side
+        max_orders_cap = 2  # Gold: max 2 orders per side (optimizer best)
     else:
         risk_per_position = 0.01 * (sl_pts / 10.0)  # $0.033 risk at 33pt SL
         max_orders_cap = min(tf["max_orders"], 10)  # Forex: max 10 orders per side (broker limit)
