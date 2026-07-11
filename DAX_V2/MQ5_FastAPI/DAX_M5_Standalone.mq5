@@ -119,17 +119,17 @@ void OnTick()
    m_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    m_spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
 
-    // Daily reset (just roll day counter, don't unhalt)
+    // Daily reset: unhalt to allow recovery each new day
     MqlDateTime dt; TimeCurrent(dt);
     if(dt.day_of_year != m_day)
     {
        m_day = dt.day_of_year;
        m_start_balance = m_account.Balance();
-       if(m_account.Balance() >= 200 && !m_halted)
-          { /* keep halted state if balance still low */ }
+       if(m_account.Balance() >= 200)
+          m_halted = false;   // resume trading on new day
     }
 
-    // Circuit breaker (tracks peak equity, not daily reset)
+    // Circuit breaker: tracks all-time peak equity, halts for current day only
     if(m_halted) return;
     double eq = m_account.Equity();
     double bal = m_account.Balance();
@@ -143,7 +143,8 @@ void OnTick()
           m_halted = true;
           Print("!!! BREAKER: Peak DD=", DoubleToString(peak_dd,1),
                 "% Peak=$", DoubleToString(m_peak_equity,2),
-                " Eq=$", DoubleToString(eq,2));
+                " Eq=$", DoubleToString(eq,2),
+                " (resumes next day)");
           return;
        }
     }
