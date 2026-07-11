@@ -24,29 +24,29 @@ int Fibonacci[FIB_MAX] = {1, 1, 2, 3, 5, 8, 13, 21, 34, 55};
 input group "--- Fibonacci Signal ---"
 input int      InpFibHighShift     = 0;       // Daily high bar shift (0=today)
 input int      InpFibLowShift      = 0;       // Daily low bar shift (0=today)
-input double   InpFibBuyLevel      = 0.382;   // Buy at this Fib retracement (from low)
-input double   InpFibSellLevel     = 0.618;   // Sell at this Fib retracement (from high)
+input double   InpFibBuyLevel      = 0.30;    // Buy zone (between 23.6% and 38.2% Fib)
+input double   InpFibSellLevel     = 0.65;    // Sell zone (near 61.8% Fib)
 input double   InpFibProximity     = 0.05;    // Proximity zone around Fib level (5%)
 
 input group "--- Grid (Fibonacci Spacing) ---"
-input double   InpBaseDistance     = 100;     // Base distance (points) * Fib multiplier
-input int      InpMaxOrders        = 5;       // Max grid orders (uses Fib sequence)
+input double   InpBaseDistance     = 30;      // Base distance (points) * Fib multiplier
+input int      InpMaxOrders        = 2;       // Max grid orders (uses Fib sequence)
 input int      InpCooldownBars     = 10;      // Min bars between grid rebuilds
 input int      InpMinGridPts       = 20;      // Min grid spacing (points)
 
 input group "--- SL/TP Clamping ---"
-input double   InpSlFactor         = 1.5;     // SL = base_distance * this factor
-input double   InpTpFactor         = 2.0;     // TP = SL * this factor (R:R)
-input int      InpSlMin            = 100;     // SL clamp MIN (points)
-input int      InpSlMax            = 800;     // SL clamp MAX (points)
-input int      InpTpMin            = 100;     // TP clamp MIN (points)
-input int      InpTpMax            = 1200;    // TP clamp MAX (points)
+input double   InpSlFactor         = 8.0;     // SL = fib_distance * this factor
+input double   InpTpFactor         = 1.4;     // TP = SL * this factor (R:R)
+input int      InpSlMin            = 200;     // SL clamp MIN (points)
+input int      InpSlMax            = 500;     // SL clamp MAX (points)
+input int      InpTpMin            = 150;     // TP clamp MIN (points)
+input int      InpTpMax            = 750;     // TP clamp MAX (points)
 input double   InpMaxSlPct         = 2.0;     // Max SL as % of price
 
 input group "--- Trail ---"
-input double   InpTrailBETrigger   = 0.5;     // Move SL to breakeven at this % of SL distance
-input double   InpTrailTrigger     = 1.0;     // Start trailing at this % of SL distance
-input double   InpTrailPct         = 0.4;     // Trail at this % of current profit
+input double   InpTrailBETrigger   = 0.7;     // Move SL to breakeven at 70% of SL distance
+input double   InpTrailTrigger     = 1.2;     // Start trailing at 120% of SL distance
+input double   InpTrailPct         = 0.5;     // Trail at 50% of current profit
 
 input group "--- Risk ---"
 input double   InpLotSize          = 0.01;    // Lot size per order
@@ -223,56 +223,39 @@ void CalcSignal()
    if(pos_in_range < 0) pos_in_range = 0;
    if(pos_in_range > 1) pos_in_range = 1;
 
-   // Check proximity to buy level (near 38.2% from bottom = support)
+   // Fibonacci-inspired signal: buy at low zone (support), sell at high zone (resistance)
    double buy_zone = InpFibBuyLevel;
-   double sell_zone = 1.0 - InpFibSellLevel;  // Convert from top
+   double sell_zone = InpFibSellLevel;
 
-   double dist_to_buy = MathAbs(pos_in_range - buy_zone);
-   double dist_to_sell = MathAbs(pos_in_range - sell_zone);
-
-   // Signal logic
-   if(dist_to_buy <= InpFibProximity && dist_to_buy < dist_to_sell)
-   {
+   if(pos_in_range < buy_zone)
       m_signal = "BUY";
-   }
-   else if(dist_to_sell <= InpFibProximity && dist_to_sell < dist_to_buy)
-   {
+   else if(pos_in_range > sell_zone)
       m_signal = "SELL";
-   }
-   else if(pos_in_range < buy_zone - InpFibProximity)
-   {
-      m_signal = "BUY";  // Below all buy levels - support zone
-   }
-   else if(pos_in_range > 1.0 - (1.0 - sell_zone) + InpFibProximity)
-   {
-      m_signal = "SELL";  // Above all sell levels - resistance zone
-   }
    else
-   {
-      m_signal = "HOLD";  // Between levels - wait
-   }
+      m_signal = "HOLD";
 
    // ATR for dynamic sizing (use daily range as estimate)
    double atr = m_fib_range * 0.06;
    if(atr <= 0) atr = mid * 0.003;
    if(atr <= 0) atr = m_fib_range * 0.06;
 
-   // Grid spacing using Fibonacci sequence
-   int grid_pts = (int)MathRound(InpBaseDistance * point / 0.01);  // Convert base to points
-   if(grid_pts < InpMinGridPts) grid_pts = InpMinGridPts;
+    // Grid spacing using Fibonacci sequence (optimized: atr * 0.3)
+    double atr_est = m_fib_range * 0.06;
+    int grid_pts = (int)MathRound(atr_est * 0.3 / point);
+    if(grid_pts < InpMinGridPts) grid_pts = InpMinGridPts;
+    if(grid_pts > 100) grid_pts = 100;
 
-   // SL clamping - Fibonacci-based
-   // SL = base_distance * Fib multiplier (e.g., 3rd Fib level = 3x base)
-   int sl_pts = (int)MathRound(grid_pts * InpSlFactor);
-   int tp_pts = (int)MathRound(sl_pts * InpTpFactor);
+    // SL clamping (optimized: atr * sl_ratio * vol_mult)
+    int sl_pts = (int)MathRound(atr_est * 0.9 * 8.0 / point);
+    int tp_pts = (int)MathRound(sl_pts * InpTpFactor);
 
-   // Clamp SL to min/max
-   if(sl_pts < InpSlMin) sl_pts = InpSlMin;
-   if(sl_pts > InpSlMax) sl_pts = InpSlMax;
+    // Clamp SL to min/max
+    if(sl_pts < InpSlMin) sl_pts = InpSlMin;
+    if(sl_pts > InpSlMax) sl_pts = InpSlMax;
 
-   // Clamp TP to min/max
-   if(tp_pts < InpTpMin) tp_pts = InpTpMin;
-   if(tp_pts > InpTpMax) tp_pts = InpTpMax;
+    // Clamp TP to min/max
+    if(tp_pts < InpTpMin) tp_pts = InpTpMin;
+    if(tp_pts > InpTpMax) tp_pts = InpTpMax;
 
    // Ensure R:R ratio after clamping
    int min_tp = (int)MathRound(sl_pts * InpTpFactor);
@@ -423,13 +406,18 @@ void BuildFibGrid()
    // Buy Limits - Fibonacci spacing below bid
    for(int i = 0; i < m_buy_orders && i < FIB_MAX; i++)
    {
-      // Fibonacci distance: base * Fibonacci[i+1]
+      // Fibonacci distance: base * Fibonacci[i]
       int fib_dist = InpBaseDistance * Fibonacci[i];
       if(fib_dist < InpMinGridPts) fib_dist = InpMinGridPts;
 
       double entry = NormalizeDouble(m_bid - fib_dist * point, _Digits);
-      double sl = NormalizeDouble(entry - m_sl_pts * point, _Digits);
-      double tp = NormalizeDouble(entry + m_tp_pts * point, _Digits);
+      // Per-order SL scales with distance to that order
+      int o_sl = (int)MathRound(fib_dist * InpSlFactor);
+      o_sl = (int)MathMax(InpSlMin, MathMin(InpSlMax, o_sl));
+      int o_tp = (int)MathRound(o_sl * InpTpFactor);
+      o_tp = (int)MathMax(InpTpMin, MathMin(InpTpMax, o_tp));
+      double sl = NormalizeDouble(entry - o_sl * point, _Digits);
+      double tp = NormalizeDouble(entry + o_tp * point, _Digits);
 
       // SL clamping - don't let SL go below min price
       if(sl < SymbolInfoDouble(_Symbol, SYMBOL_BID) - InpSlMax * point * 10)
@@ -484,8 +472,12 @@ void BuildFibGrid()
       if(fib_dist < InpMinGridPts) fib_dist = InpMinGridPts;
 
       double entry = NormalizeDouble(m_ask + fib_dist * point, _Digits);
-      double sl = NormalizeDouble(entry + m_sl_pts * point, _Digits);
-      double tp = NormalizeDouble(entry - m_tp_pts * point, _Digits);
+      int o_sl = (int)MathRound(fib_dist * InpSlFactor);
+      o_sl = (int)MathMax(InpSlMin, MathMin(InpSlMax, o_sl));
+      int o_tp = (int)MathRound(o_sl * InpTpFactor);
+      o_tp = (int)MathMax(InpTpMin, MathMin(InpTpMax, o_tp));
+      double sl = NormalizeDouble(entry + o_sl * point, _Digits);
+      double tp = NormalizeDouble(entry - o_tp * point, _Digits);
 
       // SL clamping - don't let SL go above max price
       if(sl > SymbolInfoDouble(_Symbol, SYMBOL_ASK) + InpSlMax * point * 10)
