@@ -169,14 +169,15 @@ bool CheckGlobalDD()
 
    if(m_peak_equity <= 0) return false;
 
-   double dd_pct = ((m_peak_equity - eq) / m_peak_equity) * 100.0;
-   if(dd_pct >= InpMaxGlobalDD)
+    double dd_pct = ((m_peak_equity - eq) / m_peak_equity) * 100.0;
+    double dd_limit = (m_account.Balance() < 500) ? 25.0 : InpMaxGlobalDD;
+    if(dd_pct >= dd_limit)
    {
       CloseAll();
       PurgeAll();
       m_halted = true;
       Print("!!! GLOBAL DD BREAKER: DD=", DoubleToString(dd_pct,1),
-            "% (limit=", InpMaxGlobalDD, "%) Peak=$", DoubleToString(m_peak_equity,2),
+            "% (limit=", dd_limit, "%) Peak=$", DoubleToString(m_peak_equity,2),
             " Eq=$", DoubleToString(eq,2));
       return true;
    }
