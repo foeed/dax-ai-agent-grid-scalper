@@ -139,12 +139,12 @@ void OnTick()
        double peak_dd = ((m_peak_equity - eq) / m_peak_equity) * 100;
        if(peak_dd >= InpMaxDailyLossPct)
        {
-          CloseAll(); PurgeAll();
+          PurgeAll();   // cancel pending orders only, keep positions open
           m_halted = true;
           Print("!!! BREAKER: Peak DD=", DoubleToString(peak_dd,1),
                 "% Peak=$", DoubleToString(m_peak_equity,2),
                 " Eq=$", DoubleToString(eq,2),
-                " (resumes next day)");
+                " (paused, resumes next day)");
           return;
        }
     }
