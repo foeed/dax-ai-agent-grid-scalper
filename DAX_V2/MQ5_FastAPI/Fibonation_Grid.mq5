@@ -71,7 +71,7 @@ double         m_bid, m_ask, m_spread;
 ENUM_ORDER_TYPE_FILLING m_fill_policy;
 
 // Fibonacci levels (price)
-double         m_fib_level[6];   // 0%, 23.6%, 38.2%, 50%, 61.8%, 78.6%, 100%
+double         m_fib_level[7];   // 0%, 23.6%, 38.2%, 50%, 61.8%, 78.6%, 100%
 double         m_fib_high, m_fib_low, m_fib_range;
 
 // Signal state
