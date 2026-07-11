@@ -55,6 +55,7 @@ COrderInfo     m_order;
 CAccountInfo   m_account;
 
 double         m_start_balance;
+double         m_peak_equity;      // track running peak for DD breaker
 int            m_day = -1;
 bool           m_halted;
 datetime       m_last_signal;
@@ -74,8 +75,7 @@ int OnInit()
 {
    m_trade.SetExpertMagicNumber(InpMagicNumber);
    m_start_balance = m_account.Balance();
-   m_halted = false;
-   m_last_signal = 0;
+   m_peak_equity   = m_account.Equity();
    m_day = -1;
    m_signal = "HOLD";
    m_sl_pts = 300;
@@ -84,13 +84,27 @@ int OnInit()
    m_buy_orders = 0;
    m_sell_orders = 0;
 
+   // Minimum balance check: gold needs ~$106 margin for 2x 0.01 lot orders
+   if(m_start_balance < 200)
+   {
+      m_halted = true;
+      Print("!!! BALANCE TOO LOW: $", DoubleToString(m_start_balance,2),
+            " - need minimum $200 for XAUUSD 0.01 lot. EA halted.");
+   }
+   else
+   {
+      m_halted = false;
+   }
+   m_last_signal = 0;
+
    // Detect fill policy
    m_fill_policy = ORDER_FILLING_RETURN;
    m_trade.SetTypeFilling(m_fill_policy);
 
-   Print("DAX M5 Standalone v1.00 | Balance: $", DoubleToString(m_start_balance,2),
+   Print("DAX M5 Standalone v1.01 | Balance: $", DoubleToString(m_start_balance,2),
          " | Magic: ", InpMagicNumber,
-         " | TF: ", EnumToString(Period()));
+         " | TF: ", EnumToString(Period()),
+         " | Min Bal: $200");
    return(INIT_SUCCEEDED);
 }
 
@@ -105,31 +119,34 @@ void OnTick()
    m_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    m_spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
 
-   // Daily reset
-   MqlDateTime dt; TimeCurrent(dt);
-   if(dt.day_of_year != m_day)
-   {
-      m_day = dt.day_of_year;
-      m_start_balance = m_account.Balance();
-      m_halted = false;
-   }
+    // Daily reset (just roll day counter, don't unhalt)
+    MqlDateTime dt; TimeCurrent(dt);
+    if(dt.day_of_year != m_day)
+    {
+       m_day = dt.day_of_year;
+       m_start_balance = m_account.Balance();
+       if(m_account.Balance() >= 200 && !m_halted)
+          { /* keep halted state if balance still low */ }
+    }
 
-   // Circuit breaker
-   if(m_halted) return;
-   double eq = m_account.Equity();
-   double bal = m_account.Balance();
-   if(bal > 0)
-   {
-      double daily_dd = ((m_start_balance - eq) / m_start_balance) * 100;
-      double total_dd = ((bal - eq) / bal) * 100;
-      if(daily_dd >= InpMaxDailyLossPct || total_dd >= InpMaxDrawdownPct)
-      {
-         CloseAll(); PurgeAll();
-         m_halted = true;
-         Print("!!! BREAKER: Daily DD=", DoubleToString(daily_dd,1), "% Total DD=", DoubleToString(total_dd,1), "%");
-         return;
-      }
-   }
+    // Circuit breaker (tracks peak equity, not daily reset)
+    if(m_halted) return;
+    double eq = m_account.Equity();
+    double bal = m_account.Balance();
+    if(eq > m_peak_equity) m_peak_equity = eq;
+    if(bal > 0 && m_peak_equity > 0)
+    {
+       double peak_dd = ((m_peak_equity - eq) / m_peak_equity) * 100;
+       if(peak_dd >= InpMaxDailyLossPct)
+       {
+          CloseAll(); PurgeAll();
+          m_halted = true;
+          Print("!!! BREAKER: Peak DD=", DoubleToString(peak_dd,1),
+                "% Peak=$", DoubleToString(m_peak_equity,2),
+                " Eq=$", DoubleToString(eq,2));
+          return;
+       }
+    }
 
    // Recalculate signal periodically
    if((int)(TimeCurrent() - m_last_signal) >= InpUpdateSec)
