@@ -279,33 +279,32 @@ void ManageGrid()
    // Cancel opposite orders when positions exist
    if(live > 0 && pend > 0) CancelOpposite();
 
-   // Only build if we have valid signal
-   if(m_signal == "HOLD") return;
-   if(m_buy_orders == 0 && m_sell_orders == 0) return;
-
-   // Rate limit by bar count (cooldown)
-   static datetime s_last_grid_time = 0;
-   int bars_since = iBars(_Symbol, Period()) - iBarShift(_Symbol, Period(), s_last_grid_time, false);
-   if(bars_since < InpCooldownBars && s_last_grid_time > 0) return;
-
-   // Build grid when no positions and no pending
-   if(live == 0 && pend == 0)
+   // Cancel stale pending if signal direction changed (matches Python backtest)
+   if(pend > 0 && m_signal != "HOLD")
    {
+      string expected = (m_signal == "BUY") ? "BUY_LIMIT" : "SELL_LIMIT";
+      string wrong    = (m_signal == "BUY") ? "SELL_LIMIT" : "BUY_LIMIT";
+      for(int i = OrdersTotal()-1; i >= 0; i--)
+         if(m_order.SelectByIndex(i) && m_order.Magic() == InpMagicNumber
+            && m_order.Symbol() == _Symbol)
+         {
+            ENUM_ORDER_TYPE otype = m_order.OrderType();
+            if((wrong == "BUY_LIMIT" && otype == ORDER_TYPE_BUY_LIMIT)
+               || (wrong == "SELL_LIMIT" && otype == ORDER_TYPE_SELL_LIMIT))
+               m_trade.OrderDelete(m_order.Ticket());
+         }
+      pend = CountOrders();
+   }
+
+   // Only build when no positions AND no pending (matches Python exactly)
+   if(live == 0 && pend == 0 && m_signal != "HOLD"
+      && (m_buy_orders > 0 || m_sell_orders > 0))
+   {
+      // Time-based cooldown: 30 minutes minimum between grid rebuilds
+      static datetime s_last_grid_time = 0;
+      if((int)(TimeCurrent() - s_last_grid_time) < 1800) return;
       s_last_grid_time = TimeCurrent();
       BuildGrid();
-   }
-   // Rebuild if pending orders are too far from current price
-   else if(live == 0 && pend > 0)
-   {
-      double mid = (m_bid + m_ask) / 2;
-      double nearest = GetNearestOrder();
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      if(nearest > 0 && MathAbs(nearest - mid) > m_grid_pts * 4 * point)
-      {
-         PurgeAll();
-         s_last_grid_time = TimeCurrent();
-         BuildGrid();
-      }
    }
 }
 
