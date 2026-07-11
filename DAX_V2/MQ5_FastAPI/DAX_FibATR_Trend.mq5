@@ -400,10 +400,18 @@ void CalcSignal()
     m_sl_pts = (int)MathRound(daily_range * 0.432 / point);
     m_tp_pts = (int)MathRound(m_sl_pts * 1.4);
 
-   if(m_sl_pts < InpSlMin) m_sl_pts = InpSlMin;
-   if(m_sl_pts > InpSlMax) m_sl_pts = InpSlMax;
-   if(m_tp_pts < InpTpMin) m_tp_pts = InpTpMin;
-   if(m_tp_pts > InpTpMax) m_tp_pts = InpTpMax;
+    if(m_sl_pts < InpSlMin) m_sl_pts = InpSlMin;
+    if(m_sl_pts > InpSlMax) m_sl_pts = InpSlMax;
+    if(m_tp_pts < InpTpMin) m_tp_pts = InpTpMin;
+    if(m_tp_pts > InpTpMax) m_tp_pts = InpTpMax;
+
+    // Micro account safety: if balance < $500, cap SL at 250 pts (max 2.5% risk)
+    if(m_account.Balance() < 500)
+    {
+       int micro_sl_max = 250;
+       if(m_sl_pts > micro_sl_max) m_sl_pts = micro_sl_max;
+       if(m_tp_pts > micro_sl_max * 1.4) m_tp_pts = (int)MathRound(micro_sl_max * 1.4);
+    }
 
     // R:R floor after clamping (1.4 like optimized)
     int min_tp = (int)MathRound(m_sl_pts * 1.4);
