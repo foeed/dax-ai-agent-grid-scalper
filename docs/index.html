@@ -558,27 +558,27 @@
         <p class="section-subtitle">Two deployment modes: Standalone (EA-only) or FastAPI (EA + Python backend)</p>
         <div class="arch-diagram">
 <pre>
-   METAQUOTTER 5 (Expert Advisor)              PYTHON FASTAPI BACKEND
-  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-  â”‚  DeepSeekNewsGridScalper  â”‚   HTTP/REST  â”‚    FastAPI Application   â”‚
-  â”‚  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  â”‚â—„â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–ºâ”‚    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  â”‚
-  â”‚  Grid Trading Engine      â”‚              â”‚  DeepSeek AI Service     â”‚
-  â”‚  Order Execution          â”‚              â”‚  News Intelligence       â”‚
-  â”‚  Risk Checks              â”‚              â”‚  Risk Management         â”‚
-  â”‚  On-Chart Dashboard       â”‚              â”‚  Position Sizing         â”‚
-  â”‚  MQ5 Modules:             â”‚              â”‚  Circuit Breakers        â”‚
-  â”‚   - DeepSeekAI.mqh        â”‚              â”‚  Background Scheduler    â”‚
-  â”‚   - NewsAPI.mqh           â”‚              â”‚                          â”‚
-  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚         â”‚                                â”‚         â”‚
-         â”‚         â”‚                                â”‚         â”‚
-         â–¼         â–¼                                â–¼         â–¼
-  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”            â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-  â”‚ DeepSeek AI â”‚ â”‚ NewsAPI  â”‚            â”‚  DeepSeek AI â”‚ â”‚ NewsAPI  â”‚
-  â”‚   (LLM)     â”‚ â”‚ (News)   â”‚            â”‚    (LLM)     â”‚ â”‚ (News)   â”‚
-  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜            â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+         METAQUOTTER 5 (Expert Advisor)            PYTHON FASTAPI BACKEND
 
-          STANDALONE MODE                      FASTAPI MODE
+ +--------------------------------+           +----------------------------+
+ | DeepSeekNewsGridScalper        |           | FastAPI Application        |
+ |--------------------------------|           |----------------------------|
+ | Grid Trading Engine            |  HTTP/    | DeepSeek AI Service        |
+ | Order Execution                |  REST     | News Intelligence          |
+ | Risk Checks                    |----------&gt;| Risk Management            |
+ | On-Chart Dashboard             |           | Position Sizing            |
+ | MQ5 Modules:                   |           | Circuit Breakers           |
+ |  - DeepSeekAI.mqh              |           | Background Scheduler       |
+ |  - NewsAPI.mqh                 |           |                            |
+ +--------------------------------+           +----------------------------+
+        |         |                                  |         |
+        v         v                                  v         v
+ +------------+ +----------+                  +------------+ +----------+
+ | DeepSeek   | | NewsAPI  |                  | DeepSeek   | | NewsAPI  |
+ |   (LLM)    | | (News)   |                  |   (LLM)    | | (News)   |
+ +------------+ +----------+                  +------------+ +----------+
+
+        STANDALONE MODE                     FASTAPI MODE
 </pre>
         </div>
     </div>

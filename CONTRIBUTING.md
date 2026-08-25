@@ -1,4 +1,4 @@
-﻿# Contributing to DAX AI Agent Grid Scalper
+# Contributing to DAX AI Agent Grid Scalper
 
 Thank you for your interest in contributing! This document provides guidelines and instructions for contributing.
 
@@ -88,7 +88,7 @@ python -m uvicorn app.main:app --reload
 
 - Use a clear, descriptive title
 - Reference related issues: `Fixes #123`
-- Keep changes focused â€” one feature/fix per PR
+- Keep changes focused �?" one feature/fix per PR
 - Add screenshots for UI changes (dashboard modifications)
 
 ### Review Process
