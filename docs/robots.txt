@@ -1,0 +1,46 @@
+# robots.txt - DAX AI Agent Grid Scalper
+# https://foeed.github.io/dax-ai-agent-grid-scalper/
+
+User-agent: *
+Allow: /
+
+# ===== AI / LLM Crawlers: WELCOME =====
+# We want our content cited in AI answers
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+Sitemap: https://foeed.github.io/dax-ai-agent-grid-scalper/sitemap.xml

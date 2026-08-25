@@ -1,0 +1,286 @@
+# DAX AI Agent Grid Scalper — Complete Documentation
+
+> This file contains the full project documentation in a single LLM-optimized document.
+> Last updated: 2026-08-25. Version: 2.0.0
+
+---
+
+# PART 1: OVERVIEW
+
+## What is DAX AI Agent Grid Scalper?
+
+DAX AI Agent Grid Scalper is an open-source (MIT) algorithmic trading system for MetaTrader 5 that combines:
+
+1. **Grid trading** — breakout-based grid order placement with Fibonacci and ATR variants
+2. **DeepSeek AI analysis** — LLM-generated BUY/SELL/HOLD signals with confidence scores and 0-100% risk assessment
+3. **News filtering** — real-time forex news sentiment from NewsAPI with automatic pre-news caution mode
+4. **Circuit-breaker risk management** — daily loss limits, drawdown halts, AI-adjusted position sizing
+5. **Optional Python FastAPI backend** — REST API handling AI computation, risk calculations, and news processing (Docker-ready)
+
+## Two Deployment Modes
+
+**Standalone Mode**: The MQL5 Expert Advisor calls DeepSeek API and NewsAPI directly from MetaTrader 5 via HTTP WebRequest. Simplest setup — just copy files, compile, enter API keys.
+
+**FastAPI Mode**: The EA communicates with a Python backend over REST. The backend handles AI analysis, news processing, risk scoring, and position sizing. Better for multi-terminal setups, custom logic, and scalability.
+
+## Expert Advisor Variants
+
+| EA | Strategy | Timeframe | Mode |
+|----|----------|-----------|------|
+| DeepSeekNewsGridScalper_V2 | Grid + AI + News (flagship) | M1-H4 | Standalone |
+| EAFastConnector | Grid + Backend integration | M1-H4 | FastAPI |
+| DAX_M5_Standalone | M5-optimized grid scalping | M5 | Standalone |
+| DAX_FibATR_Trend | Fibonacci ATR trend-following | M5-M30 | Standalone |
+| Fibonation_Grid | Fibonacci-spaced grid | M5 | Standalone |
+
+## Technology Stack
+
+MetaTrader 5 / MQL5, Python 3.11 / FastAPI / Pydantic / httpx / APScheduler, Docker / docker-compose, DeepSeek AI API, NewsAPI
+
+## Cost Breakdown
+
+- Software: FREE (MIT License)
+- NewsAPI: Free tier = 100 requests/day (sufficient)
+- DeepSeek API: ~$5 credit lasts months at default 5-minute analysis interval
+
+---
+
+# PART 2: QUICK START (Standalone Mode)
+
+## Step 1: Get API Keys
+
+**NewsAPI (Free)**: Register at https://newsapi.org/register — copy your API key.
+
+**DeepSeek AI**: Create account at https://platform.deepseek.com/ — add ~$5 credit — copy your API key.
+
+## Step 2: Install in MetaTrader 5
+
+Copy `DeepSeekNewsGridScalper_V2.mq5` to: `C:\Users\[You]\AppData\Roaming\MetaQuotes\Terminal\[TerminalID]\MQL5\Experts\`
+
+Copy the `Include/` folder files (`DeepSeekAI.mqh`, `NewsAPI.mqh`) to: `MQL5\Include\`
+
+## Step 3: Compile
+
+Open the EA in MetaEditor (F4 from MT5), press F7 to compile. Verify "0 errors".
+
+## Step 4: Allow WebRequest URLs
+
+In MetaTrader: Tools → Options → Expert Advisors → check "Allow WebRequest for listed URL" and add:
+- https://api.newsapi.org
+- https://api.deepseek.com
+
+## Step 5: Attach to Chart
+
+Drag the EA onto an EURUSD chart (H1 or H4 recommended), enter API keys in inputs, enable "Allow Algo Trading", click OK.
+
+## Step 6: Verify
+
+Check the Experts tab logs for initialization messages and confirm the on-chart dashboard appears showing engine status, balance, equity, AI status, and indicators.
+
+## Recommended Risk Profiles
+
+| Profile | Risk/Trade | Daily Loss Limit | Grid Orders | Grid Distance |
+|---------|-----------|------------------|-------------|---------------|
+| Conservative | 1.0% | 5.0% | 1 | 400 pts |
+| Standard | 2.0% | 10.0% | 2 | 300 pts |
+| Aggressive | 3.0% | 15.0% | 3 | 250 pts |
+
+---
+
+# PART 3: FASTAPI BACKEND SETUP
+
+## Docker (Recommended)
+
+```bash
+cd Backend
+copy .env.example .env    # then edit .env with your API keys
+docker-compose up -d
+docker-compose ps         # verify running
+```
+
+## Local Python
+
+```bash
+cd Backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Then configure the EA input `BackendURL` to `http://localhost:8000` and add `http://localhost:8000` to MT5's allowed WebRequest URLs.
+
+## Environment Variables (.env)
+
+```
+DEEPSEEK_API_KEY=your_key
+NEWS_API_KEY=your_key
+DEBUG=false
+HOST=0.0.0.0
+PORT=8000
+MAX_RISK_PER_TRADE=0.02
+MAX_DAILY_LOSS=0.10
+```
+
+## API Endpoints
+
+Trading:
+- POST /api/v1/trading/signal — get AI trading signal
+- POST /api/v1/trading/analyze — full market analysis
+- GET /api/v1/trading/dashboard — dashboard data
+
+Risk Management:
+- POST /api/v1/risk/assess — risk assessment
+- POST /api/v1/risk/position-size — position sizing
+- POST /api/v1/risk/dynamic-sl — dynamic stop loss
+- POST /api/v1/risk/circuit-breakers — circuit breaker checks
+
+News:
+- GET /api/v1/news/{symbol} — forex news
+- GET /api/v1/news/{symbol}/sentiment — sentiment score
+- GET /api/v1/news/{symbol}/high-impact — high impact event check
+
+System:
+- GET /health — health check
+- Interactive Swagger docs: http://localhost:8000/docs
+
+## Sample Signal Response
+
+```json
+{
+  "signal": "BUY",
+  "risk_score": 0.35,
+  "confidence": 0.78,
+  "suggested_volume": 0.05,
+  "risk_level": "MEDIUM",
+  "news_caution": false
+}
+```
+
+---
+
+# PART 4: HOW THE AI WORKS
+
+## Analysis Cycle (every 5 minutes by default)
+
+1. Fetches latest news for the traded currency pair via NewsAPI
+2. Analyzes technical indicators (RSI, ATR, EMA20/50)
+3. Calculates composite risk score (0-100%)
+4. Generates signal: BUY / SELL / HOLD with confidence level
+5. Adjusts position sizing and stop losses dynamically
+
+## Risk Score Composition
+
+Technical analysis risk (30%) + Volatility risk (30%) + News risk (20%) + AI confidence risk (20%)
+
+Risk levels:
+- 0-30% Low → normal trading, full position sizes
+- 30-60% Medium → slightly reduced sizes
+- 60-80% High → minimal trading
+- 80-100% Extreme → no new trades
+
+## News Protection
+
+- 30 minutes before high-impact news → caution mode activates
+- Position sizes cut by 50%
+- Spread limits tightened by 20%
+- Only high-confidence trades allowed through
+
+## Circuit Breakers
+
+- Daily loss limit (default 10%) → closes all positions
+- Max drawdown limit (default 15%) → emergency halt of new trading
+- AI-adjusted limits tighten when AI risk score exceeds 70%
+
+---
+
+# PART 5: BEST PRACTICES
+
+## Best Currency Pairs
+
+Primary: EURUSD, GBPUSD, USDJPY
+Secondary: EURGBP, AUDUSD, USDCAD
+Avoid: exotics (USDTRY, USDZAR) and minor pairs during off-hours due to spreads.
+
+## Best Trading Sessions (UTC)
+
+London 07:00-16:00 (good), New York 12:00-21:00 (good), London/NY Overlap 12:00-16:00 (best), Asian 23:00-08:00 (avoid). Avoid Friday afternoon, Sunday evening, major holidays.
+
+## Safety Checklist
+
+1. Always test on a demo account first
+2. Start with the Conservative risk profile
+3. Use a VPS for 24/5 operation
+4. Monitor regularly; never risk money you cannot afford to lose
+
+---
+
+# PART 6: PROJECT STRUCTURE
+
+```
+dax-ai-agent-grid-scalper/
+├── DeepSeekNewsGridScalper_V2.mq5   # Main standalone EA (800+ lines)
+├── Include/
+│   ├── DeepSeekAI.mqh               # AI integration module
+│   └── NewsAPI.mqh                  # News API module
+├── Config/
+│   └── EA_Config.ini                # EA configuration
+├── Backend/                         # Python FastAPI backend
+│   ├── app/main.py                  # FastAPI entry point
+│   ├── app/core/                    # Config & database
+│   ├── app/routers/                 # API routes (trading, analysis, news, risk)
+│   ├── app/services/                # Business logic (deepseek, news, risk)
+│   ├── Dockerfile                   # Docker build
+│   └── docker-compose.yml           # Orchestration with health checks
+├── MQ5_FastAPI/                     # FastAPI-connected EA variants
+├── docs/
+│   └── index.html                   # Landing page (GitHub Pages)
+└── Scripts/
+    └── TestAPIs.mq5                 # API testing script
+```
+
+---
+
+# PART 7: FAQ
+
+**What is DAX AI Agent Grid Scalper?**
+An open-source MetaTrader 5 Expert Advisor combining breakout grid trading with DeepSeek AI LLM market analysis, real-time NewsAPI news filtering, and automated circuit-breaker risk management, with an optional Python FastAPI backend.
+
+**Is it free?**
+Yes — MIT licensed. Only optional API costs: NewsAPI free tier (100 req/day) and DeepSeek credits (~$5 for months of use).
+
+**How does DeepSeek AI improve grid trading?**
+It generates BUY/SELL/HOLD signals with confidence scores, produces a 0-100% risk score from technical + volatility + news data, dynamically adjusts position sizes and stop losses, and blocks trades during extreme-risk conditions.
+
+**What are the system requirements?**
+Windows with MetaTrader 5 for standalone mode. For FastAPI mode additionally: Python 3.11+ or Docker.
+
+**Which currency pairs work best?**
+Liquid majors: EURUSD, GBPUSD, USDJPY. Avoid exotic pairs.
+
+**How does the news filtering work?**
+The system pulls real-time forex news from NewsAPI, runs sentiment scoring, detects high-impact economic events, and enters caution mode 30 minutes before them — halving position sizes and tightening spread filters.
+
+**Can I run it on a real/funded account?**
+Technically yes, but it is provided for educational purposes. Always test on demo first; forex trading carries substantial risk of capital loss.
+
+**What's the difference between Standalone and FastAPI mode?**
+Standalone: EA calls DeepSeek/NewsAPI directly from MT5 — simplest setup. FastAPI: EA talks to a Python backend that centralizes AI/news/risk logic — better for scale, customization, and multi-terminal deployments.
+
+**How do I set up the backend with Docker?**
+`cd Backend && copy .env.example .env && docker-compose up -d`. Add your API keys to `.env` first. Then point the EA's BackendURL input to http://localhost:8000.
+
+---
+
+# PART 8: LINKS & CITATION
+
+- Repository: https://github.com/foeed/dax-ai-agent-grid-scalper
+- Landing page: https://foeed.github.io/dax-ai-agent-grid-scalper/
+- Releases: https://github.com/foeed/dax-ai-agent-grid-scalper/releases/tag/v2.0.0
+- Issues: https://github.com/foeed/dax-ai-agent-grid-scalper/issues
+- License: MIT
+- Version: 2.0.0 (August 2026)
+
+Support the project: USDT BEP20 (BSC) — 0xb13d29622961004b54c15452a233a43215331fe2
+
+Disclaimer: This software is for educational and research purposes only. Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors. Past performance is not indicative of future results.

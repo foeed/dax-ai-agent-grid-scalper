@@ -1,11 +1,71 @@
+# ============================================
+# DAX AI Agent Grid Scalper - .gitignore
+# ============================================
+
+# ----- Environment & Secrets -----
 .env
-.venv/
+.env.local
+.env.production
+*.env
+!.env.example
+
+# ----- Python -----
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-data/*.json
-data/*.jsonl
-data/*.csv
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.tox/
+.nox/
+
+# ----- Backtest & Optimization Results -----
+Backend/backtest_*.json
+Backend/multi_backtest_*.json
+Backend/optimization_results_*.json
+Backend/optimize_m*_results_*.json
+*.backtest.json
+backtest_*.json
+optimization_results_*.json
+
+# ----- Logs -----
+*.log
 logs/
+*.mq5.log
+
+# ----- MetaTrader 5 -----
+*.ex5
+*.ex4
+
+# ----- Docker -----
+docker-compose.override.yml
+
+# ----- IDE & Editor -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- OS -----
+desktop.ini
+._*
+
+# ----- Local-only working folders -----
+.venv-mcp/
+daxv3/
+.dax_cache/
+temp/

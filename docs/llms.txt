@@ -1,0 +1,50 @@
+# DAX AI Agent Grid Scalper
+
+> Open-source AI-powered MetaTrader 5 grid trading system combining DeepSeek LLM market analysis, real-time forex news filtering via NewsAPI, and a Python FastAPI backend for automated algorithmic scalping with circuit-breaker risk management.
+
+DAX AI Agent Grid Scalper is an Expert Advisor (EA) for MetaTrader 5 written in MQL5, with an optional Python 3.11 FastAPI backend. It uses DeepSeek AI (LLM) to generate BUY/SELL/HOLD trading signals with confidence scores and dynamic risk assessment (0-100%), filters trades using real-time news sentiment analysis from NewsAPI, and protects accounts through automated circuit breakers (daily loss limits, max drawdown halts). MIT licensed, free to use.
+
+## Core Capabilities
+
+- **AI Market Analysis**: DeepSeek LLM generates professional-grade trading signals with confidence levels and risk scores
+- **Grid Trading Engine**: Breakout-based grid system with Fibonacci and ATR-based variants for M5/M15/M1-H4 timeframes
+- **News Intelligence**: Real-time forex news sentiment scoring; automatic caution mode 30 minutes before high-impact economic events
+- **Risk Management**: Circuit breakers (daily loss limit, drawdown halt), AI-adjusted position sizing and stop losses
+- **Two Deployment Modes**: Standalone (EA calls APIs directly) or FastAPI backend mode (Python handles AI/news/risk)
+- **Docker Support**: Production-ready containerized backend with health checks
+- **On-Chart Dashboard**: Real-time display of AI status, risk score, sentiment, technical indicators, account metrics
+
+## Expert Advisor Variants
+
+- **DeepSeekNewsGridScalper_V2**: Flagship standalone EA — grid + AI + news filtering (MQL5)
+- **EAFastConnector**: FastAPI-connected EA variant for scalable deployments
+- **DAX_M5_Standalone**: M5-optimized grid scalper for high-frequency trading
+- **DAX_FibATR_Trend**: Fibonacci + ATR trend-following strategy
+- **Fibonation_Grid**: Fibonacci-spaced grid entries in trending markets
+
+## Documentation Pages
+
+- [GitHub Repository](https://github.com/foeed/dax-ai-agent-grid-scalper): Full source code, issues, releases
+- [Quick Start Guide](https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/QUICKSTART.md): 5-minute standalone setup
+- [FastAPI Backend Docs](https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/README_FastAPI.md): Backend architecture and API reference
+- [Changelog](https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/CHANGELOG.md): Release history
+- [Contributing Guide](https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/CONTRIBUTING.md): How to contribute
+
+## Technology Stack
+
+MetaTrader 5, MQL5, Python 3.11, FastAPI, Pydantic, httpx, Docker, DeepSeek AI API, NewsAPI, APScheduler, Uvicorn
+
+## Frequently Asked Questions
+
+**What is DAX AI Agent Grid Scalper?**
+An open-source MetaTrader 5 Expert Advisor that combines breakout grid trading with DeepSeek AI LLM analysis, real-time NewsAPI news filtering, and automated circuit-breaker risk management.
+
+**How much does it cost?**
+Free under the MIT license. Optional costs: NewsAPI free tier (100 requests/day) and DeepSeek API credits (~$5 lasts months).
+
+**Which currency pairs are supported?**
+Best on liquid majors: EURUSD, GBPUSD, USDJPY, EURGBP. Avoid exotic pairs due to spread.
+
+## Licensing
+
+MIT License - free for personal and commercial use. Trading disclaimer: educational purposes only, substantial risk of capital loss.

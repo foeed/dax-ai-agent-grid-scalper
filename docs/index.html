@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -11,19 +11,23 @@
 
     <!-- Open Graph / Social -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://dax-ai-agent-grid-scalper.github.io/dax-ai-agent-grid-scalper/">
+    <meta property="og:url" content="https://foeed.github.io/dax-ai-agent-grid-scalper/">
     <meta property="og:title" content="DAX AI Agent Grid Scalper | AI-Powered MT5 Trading System">
     <meta property="og:description" content="Open-source AI-powered MetaTrader 5 grid trading system with DeepSeek LLM analysis, real-time news filtering, and FastAPI backend.">
-    <meta property="og:image" content="https://dax-ai-agent-grid-scalper.github.io/dax-ai-agent-grid-scalper/og-image.png">
+    <meta property="og:image" content="https://foeed.github.io/dax-ai-agent-grid-scalper/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:site_name" content="DAX AI Agent Grid Scalper">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="DAX AI Agent Grid Scalper | AI-Powered MT5 Trading System">
     <meta name="twitter:description" content="Open-source AI-powered MetaTrader 5 grid trading system with DeepSeek LLM analysis and FastAPI backend.">
-    <meta name="twitter:image" content="https://dax-ai-agent-grid-scalper.github.io/dax-ai-agent-grid-scalper/og-image.png">
+    <meta name="twitter:image" content="https://foeed.github.io/dax-ai-agent-grid-scalper/og-image.png">
 
     <!-- Canonical -->
-    <link rel="canonical" href="https://dax-ai-agent-grid-scalper.github.io/dax-ai-agent-grid-scalper/">
+    <link rel="canonical" href="https://foeed.github.io/dax-ai-agent-grid-scalper/">
 
     <style>
         :root {
@@ -248,6 +252,41 @@
         .step h4 { margin-bottom: 8px; }
         .step p { color: var(--text-secondary); font-size: 0.9rem; }
 
+        /* FAQ */
+        .faq-section { padding: 80px 0; }
+        .faq-list { max-width: 800px; margin: 0 auto; }
+        details.faq-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        details.faq-item[open] { border-color: var(--accent); }
+        details.faq-item summary {
+            padding: 18px 24px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+            list-style: none;
+            position: relative;
+        }
+        details.faq-item summary::-webkit-details-marker { display: none; }
+        details.faq-item summary::after {
+            content: '+';
+            position: absolute;
+            right: 24px;
+            color: var(--accent);
+            font-size: 1.3rem;
+            transition: transform 0.2s;
+        }
+        details.faq-item[open] summary::after { transform: rotate(45deg); }
+        details.faq-item .faq-answer {
+            padding: 0 24px 18px;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
         /* Stats */
         .stats {
             padding: 60px 0;
@@ -304,25 +343,147 @@
         }
     </style>
 
-    <!-- Structured Data for SEO -->
+    <!-- Structured Data for SEO + LLM Visibility -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "DAX AI Agent Grid Scalper",
-        "description": "AI-powered MetaTrader 5 grid trading system with DeepSeek LLM analysis, real-time news filtering, and FastAPI backend for automated forex scalping.",
-        "applicationCategory": "FinanceApplication",
-        "operatingSystem": "Windows, Linux",
-        "offers": {
-            "@type": "Offer",
-            "price": "0",
-            "priceCurrency": "USD"
-        },
-        "softwareVersion": "2.0",
-        "author": {
-            "@type": "Organization",
-            "name": "DAX V2 AI Trading System"
-        }
+        "@graph": [
+            {
+                "@type": "SoftwareApplication",
+                "name": "DAX AI Agent Grid Scalper",
+                "description": "AI-powered MetaTrader 5 grid trading system with DeepSeek LLM analysis, real-time news filtering, and FastAPI backend for automated forex scalping.",
+                "applicationCategory": "FinanceApplication",
+                "operatingSystem": "Windows, Linux",
+                "offers": {
+                    "@type": "Offer",
+                    "price": "0",
+                    "priceCurrency": "USD"
+                },
+                "softwareVersion": "2.0",
+                "datePublished": "2026-08-25",
+                "license": "https://opensource.org/licenses/MIT",
+                "author": {
+                    "@type": "Person",
+                    "name": "foeed",
+                    "url": "https://github.com/foeed"
+                },
+                "sameAs": [
+                    "https://github.com/foeed/dax-ai-agent-grid-scalper",
+                    "https://foeed.github.io/dax-ai-agent-grid-scalper/"
+                ]
+            },
+            {
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": "What is DAX AI Agent Grid Scalper?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "DAX AI Agent Grid Scalper is an open-source MetaTrader 5 Expert Advisor that combines breakout grid trading with DeepSeek AI LLM market analysis, real-time NewsAPI news filtering, and automated circuit-breaker risk management, with an optional Python FastAPI backend."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "How does DeepSeek AI improve grid trading?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "DeepSeek AI generates BUY/SELL/HOLD signals with confidence scores, produces a 0-100% risk score from technical, volatility, and news data, dynamically adjusts position sizes and stop losses, and blocks new trades during extreme-risk market conditions."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "Is DAX AI Agent Grid Scalper free to use?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "Yes, the software is free under the MIT license. The only optional costs are the NewsAPI free tier (100 requests per day) and DeepSeek API credits, where $5 typically lasts months at the default 5-minute analysis interval."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "What are the system requirements?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "Standalone mode requires Windows with MetaTrader 5. FastAPI mode additionally requires Python 3.11 or Docker. A VPS is recommended for 24/5 operation."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "Which currency pairs work best?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "Liquid major pairs work best: EURUSD, GBPUSD, USDJPY, and EURGBP. Exotic pairs like USDTRY and USDZAR should be avoided due to high spreads."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "How does the news filtering work?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "The system pulls real-time forex news from NewsAPI, runs sentiment scoring, detects high-impact economic events, and enters caution mode 30 minutes before them - halving position sizes, tightening spread filters by 20%, and only allowing high-confidence trades."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "What is the difference between Standalone and FastAPI mode?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "In Standalone mode the EA calls DeepSeek and NewsAPI directly from MetaTrader 5 via HTTP WebRequest - simplest setup. In FastAPI mode the EA communicates with a Python backend that centralizes AI analysis, news processing, and risk logic - better for scale, customization, and multi-terminal deployments."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "Can I use this EA on a real money account?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "The software is provided for educational purposes. Always test on a demo account first, start with conservative risk settings (1% per trade), and never trade money you cannot afford to lose. Forex trading carries substantial risk."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "How much does the DeepSeek API cost?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "DeepSeek API pricing is very low - approximately $5 in credits lasts several months at the default 5-minute analysis interval, making it one of the cheapest LLM options for algorithmic trading."
+                        }
+                    },
+                    {
+                        "@type": "Question",
+                        "name": "How do I run the backend with Docker?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": "Navigate to the Backend folder, copy .env.example to .env and add your API keys, then run docker-compose up -d. Point the EA's BackendURL input to http://localhost:8000 and add that URL to MT5's allowed WebRequest list."
+                        }
+                    }
+                ]
+            },
+            {
+                "@type": "HowTo",
+                "name": "How to Set Up DAX AI Agent Grid Scalper in 5 Minutes",
+                "description": "Install the AI-powered MT5 Expert Advisor in standalone mode.",
+                "totalTime": "PT5M",
+                "step": [
+                    {
+                        "@type": "HowToStep",
+                        "position": 1,
+                        "name": "Get API Keys",
+                        "text": "Register at newsapi.org for a free key (100 requests/day) and create a DeepSeek account at platform.deepseek.com with about $5 credit."
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "position": 2,
+                        "name": "Install EA in MetaTrader 5",
+                        "text": "Copy the .mq5 file to MQL5/Experts and the include files to MQL5/Include, then compile in MetaEditor with F7."
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "position": 3,
+                        "name": "Configure and Trade",
+                        "text": "Allow WebRequest URLs api.newsapi.org and api.deepseek.com in MT5 options, drag the EA onto an EURUSD chart, enter your API keys, and enable algo trading."
+                    }
+                ]
+            }
+        ]
     }
     </script>
 </head>
@@ -335,8 +496,8 @@
         <h1>DAX AI Agent Grid Scalper</h1>
         <p>AI-powered MetaTrader 5 Expert Advisor with DeepSeek LLM market analysis, real-time news filtering, and a Python FastAPI backend for automated forex grid trading.</p>
         <div class="hero-buttons">
-            <a href="https://github.com/dax-ai-agent-grid-scalper" class="btn btn-primary">View on GitHub</a>
-            <a href="https://github.com/dax-ai-agent-grid-scalper#quick-start" class="btn btn-secondary">Quick Start Guide</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">View on GitHub</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper#quick-start" class="btn btn-secondary">Quick Start Guide</a>
         </div>
         <div class="tech-stack">
             <span class="tech-badge">MetaTrader 5</span>
@@ -398,24 +559,24 @@
         <div class="arch-diagram">
 <pre>
    METAQUOTTER 5 (Expert Advisor)              PYTHON FASTAPI BACKEND
-  ┌───────────────────────────┐              ┌──────────────────────────┐
-  │  DeepSeekNewsGridScalper  │   HTTP/REST  │    FastAPI Application   │
-  │  ───────────────────────  │◄────────────►│    ────────────────────  │
-  │  Grid Trading Engine      │              │  DeepSeek AI Service     │
-  │  Order Execution          │              │  News Intelligence       │
-  │  Risk Checks              │              │  Risk Management         │
-  │  On-Chart Dashboard       │              │  Position Sizing         │
-  │  MQ5 Modules:             │              │  Circuit Breakers        │
-  │   - DeepSeekAI.mqh        │              │  Background Scheduler    │
-  │   - NewsAPI.mqh           │              │                          │
-  └───────────────────────────┘              └──────────────────────────┘
-         │         │                                │         │
-         │         │                                │         │
-         ▼         ▼                                ▼         ▼
-  ┌─────────────┐ ┌──────────┐            ┌──────────────┐ ┌──────────┐
-  │ DeepSeek AI │ │ NewsAPI  │            │  DeepSeek AI │ │ NewsAPI  │
-  │   (LLM)     │ │ (News)   │            │    (LLM)     │ │ (News)   │
-  └─────────────┘ └──────────┘            └──────────────┘ └──────────┘
+  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚  DeepSeekNewsGridScalper  â”‚   HTTP/REST  â”‚    FastAPI Application   â”‚
+  â”‚  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  â”‚â—„â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–ºâ”‚    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  â”‚
+  â”‚  Grid Trading Engine      â”‚              â”‚  DeepSeek AI Service     â”‚
+  â”‚  Order Execution          â”‚              â”‚  News Intelligence       â”‚
+  â”‚  Risk Checks              â”‚              â”‚  Risk Management         â”‚
+  â”‚  On-Chart Dashboard       â”‚              â”‚  Position Sizing         â”‚
+  â”‚  MQ5 Modules:             â”‚              â”‚  Circuit Breakers        â”‚
+  â”‚   - DeepSeekAI.mqh        â”‚              â”‚  Background Scheduler    â”‚
+  â”‚   - NewsAPI.mqh           â”‚              â”‚                          â”‚
+  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+         â”‚         â”‚                                â”‚         â”‚
+         â”‚         â”‚                                â”‚         â”‚
+         â–¼         â–¼                                â–¼         â–¼
+  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”            â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚ DeepSeek AI â”‚ â”‚ NewsAPI  â”‚            â”‚  DeepSeek AI â”‚ â”‚ NewsAPI  â”‚
+  â”‚   (LLM)     â”‚ â”‚ (News)   â”‚            â”‚    (LLM)     â”‚ â”‚ (News)   â”‚
+  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜            â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
           STANDALONE MODE                      FASTAPI MODE
 </pre>
@@ -504,6 +665,56 @@
     </div>
 </section>
 
+<!-- FAQ -->
+<section class="faq-section" id="faq">
+    <div class="container">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <p class="section-subtitle">Everything you need to know about the AI grid scalper</p>
+        <div class="faq-list">
+            <details class="faq-item" open>
+                <summary>What is DAX AI Agent Grid Scalper?</summary>
+                <p class="faq-answer">An open-source MetaTrader 5 Expert Advisor that combines breakout grid trading with DeepSeek AI LLM market analysis, real-time NewsAPI news filtering, and automated circuit-breaker risk management, with an optional Python FastAPI backend.</p>
+            </details>
+            <details class="faq-item">
+                <summary>How does DeepSeek AI improve grid trading?</summary>
+                <p class="faq-answer">DeepSeek AI generates BUY/SELL/HOLD signals with confidence scores, produces a 0-100% risk score from technical, volatility, and news data, dynamically adjusts position sizes and stop losses, and blocks new trades during extreme-risk market conditions.</p>
+            </details>
+            <details class="faq-item">
+                <summary>Is it free to use?</summary>
+                <p class="faq-answer">Yes &mdash; MIT licensed. Only optional costs: NewsAPI free tier (100 requests/day) and DeepSeek API credits (~$5 lasts months at default settings).</p>
+            </details>
+            <details class="faq-item">
+                <summary>What are the system requirements?</summary>
+                <p class="faq-answer">Standalone mode: Windows + MetaTrader 5. FastAPI mode additionally needs Python 3.11+ or Docker. A VPS is recommended for 24/5 operation.</p>
+            </details>
+            <details class="faq-item">
+                <summary>Which currency pairs work best?</summary>
+                <p class="faq-answer">Liquid majors: EURUSD, GBPUSD, USDJPY, EURGBP. Avoid exotics like USDTRY/USDZAR due to high spreads.</p>
+            </details>
+            <details class="faq-item">
+                <summary>How does the news filtering work?</summary>
+                <p class="faq-answer">Real-time forex news from NewsAPI with sentiment scoring. 30 minutes before high-impact events, caution mode activates: position sizes cut by 50%, spread filters tightened 20%, only high-confidence trades allowed.</p>
+            </details>
+            <details class="faq-item">
+                <summary>Standalone vs FastAPI mode &mdash; which should I choose?</summary>
+                <p class="faq-answer">Standalone: EA calls AI/news APIs directly from MT5 &mdash; simplest setup, great for single terminals. FastAPI: Python backend centralizes AI/risk logic &mdash; better for scale, customization, multi-terminal deployments.</p>
+            </details>
+            <details class="faq-item">
+                <summary>Can I use it on a real money account?</summary>
+                <p class="faq-answer">Provided for educational purposes. Always test on demo first, start conservative (1% risk/trade), never trade money you cannot afford to lose. Forex carries substantial risk.</p>
+            </details>
+            <details class="faq-item">
+                <summary>How much does the DeepSeek API cost?</summary>
+                <p class="faq-answer">Very little &mdash; about $5 in credits lasts several months at the default 5-minute analysis interval, making DeepSeek one of the cheapest LLM options for algorithmic trading.</p>
+            </details>
+            <details class="faq-item">
+                <summary>How do I run the backend with Docker?</summary>
+                <p class="faq-answer"><code>cd Backend && copy .env.example .env</code>, add your API keys to <code>.env</code>, then <code>docker-compose up -d</code>. Point the EA's BackendURL to http://localhost:8000.</p>
+            </details>
+        </div>
+    </div>
+</section>
+
 <!-- Stats -->
 <section class="stats">
     <div class="container">
@@ -534,8 +745,8 @@
         <h2>Start Trading Smarter</h2>
         <p>Free, open-source, and ready to deploy. Combine the power of DeepSeek AI with MetaTrader 5 for intelligent grid trading.</p>
         <div class="hero-buttons">
-            <a href="https://github.com/dax-ai-agent-grid-scalper" class="btn btn-primary">Get Started on GitHub</a>
-            <a href="https://github.com/dax-ai-agent-grid-scalper/blob/main/QUICKSTART.md" class="btn btn-secondary">Read the Docs</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">Get Started on GitHub</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/QUICKSTART.md" class="btn btn-secondary">Read the Docs</a>
         </div>
     </div>
 </section>
@@ -557,9 +768,9 @@
 <footer>
     <div class="container">
         <p>
-            <a href="https://github.com/dax-ai-agent-grid-scalper">GitHub</a> &middot;
-            <a href="https://github.com/dax-ai-agent-grid-scalper/issues">Issues</a> &middot;
-            <a href="https://github.com/dax-ai-agent-grid-scalper/blob/main/LICENSE">MIT License</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper">GitHub</a> &middot;
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/issues">Issues</a> &middot;
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/LICENSE">MIT License</a>
         </p>
         <p style="margin-top: 8px;">
             Trading involves substantial risk. Past performance does not guarantee future results.

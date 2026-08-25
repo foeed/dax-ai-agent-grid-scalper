@@ -1,4 +1,4 @@
-# Contributing to DAX AI Agent Grid Scalper
+﻿# Contributing to DAX AI Agent Grid Scalper
 
 Thank you for your interest in contributing! This document provides guidelines and instructions for contributing.
 
@@ -18,7 +18,7 @@ Please read our [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing. We
 
 ### Reporting Bugs
 
-1. Check [existing issues](https://github.com/dax-ai-agent-grid-scalper/issues) to avoid duplicates
+1. Check [existing issues](https://github.com/foeed/dax-ai-agent-grid-scalper/issues) to avoid duplicates
 2. Open a new issue using the **Bug Report** template
 3. Include: MT5 version, Python version, OS, steps to reproduce, logs
 
@@ -88,7 +88,7 @@ python -m uvicorn app.main:app --reload
 
 - Use a clear, descriptive title
 - Reference related issues: `Fixes #123`
-- Keep changes focused — one feature/fix per PR
+- Keep changes focused â€” one feature/fix per PR
 - Add screenshots for UI changes (dashboard modifications)
 
 ### Review Process
@@ -121,4 +121,4 @@ python -m uvicorn app.main:app --reload
 
 ## Questions?
 
-Open an issue with the `question` label or start a [Discussion](https://github.com/dax-ai-agent-grid-scalper/discussions).
+Open an issue with the `question` label or start a [Discussion](https://github.com/foeed/dax-ai-agent-grid-scalper/discussions).
