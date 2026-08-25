@@ -6,8 +6,9 @@
     <title>DAX AI Agent Grid Scalper | AI-Powered MT5 Expert Advisor + Python Trading Backend</title>
     <meta name="description" content="Open-source AI-powered MetaTrader 5 grid trading system with DeepSeek LLM analysis, real-time news filtering, and FastAPI backend for automated forex scalping.">
     <meta name="keywords" content="metatrader5, mql5, algorithmic trading, AI trading, deepseek, forex, grid trading, scalping, python, fastapi, expert advisor, automated trading, risk management, forex bot, trading bot, MT5 EA, AI forex, news trading">
-    <meta name="author" content="DAX V2 AI Trading System">
+    <meta name="author" content="foeed">
     <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#000000">
 
     <!-- Open Graph / Social -->
     <meta property="og:type" content="website">
@@ -29,317 +30,432 @@
     <!-- Canonical -->
     <link rel="canonical" href="https://foeed.github.io/dax-ai-agent-grid-scalper/">
 
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-card: #21262d;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --accent: #58a6ff;
-            --accent-green: #3fb950;
-            --accent-purple: #bc8cff;
-            --accent-orange: #d29922;
-            --border: #30363d;
+            --bg: #000000;
+            --bg2: #070707;
+            --bg3: #0d0d0d;
+            --card: #0a0a0a;
+            --card2: #111111;
+            --neon: #00ff88;
+            --neon2: #00f0ff;
+            --neon3: #b56bff;
+            --text: #f2f2f2;
+            --muted: #888888;
+            --dim: #555555;
+            --border: #1a1a1a;
+            --border-neon: rgba(0,255,136,0.18);
+            --glow: 0 0 24px rgba(0,255,136,0.25);
+            --glow2: 0 0 40px rgba(0,255,136,0.15);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--neon) var(--bg); }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, var(--neon), var(--neon2)); border-radius: 99px; }
+        ::selection { background: var(--neon); color: #000; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+        .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
-        /* Hero */
+        /* ── NAV ── */
+        .nav {
+            position: sticky; top: 0; z-index: 50;
+            backdrop-filter: blur(20px) saturate(1.4);
+            -webkit-backdrop-filter: blur(20px) saturate(1.4);
+            background: rgba(0,0,0,0.72);
+            border-bottom: 1px solid #111;
+        }
+        .nav-inner {
+            display: flex; align-items: center; justify-content: space-between;
+            height: 56px; max-width: 1120px; margin: 0 auto; padding: 0 24px;
+        }
+        .nav-logo {
+            display: flex; align-items: center; gap: 10px;
+            font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1rem;
+            letter-spacing: -0.02em; color: var(--text); text-decoration: none;
+        }
+        .nav-logo-mark {
+            width: 30px; height: 30px; border-radius: 8px;
+            background: linear-gradient(135deg, var(--neon), var(--neon2));
+            display: grid; place-items: center;
+            color: #000; font-size: 0.85rem; font-weight: 800;
+            box-shadow: var(--glow);
+        }
+        .nav-links { display: flex; gap: 22px; align-items: center; }
+        .nav-links a {
+            font-size: 0.85rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+            color: var(--muted); text-decoration: none; transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--neon); }
+        .nav-cta {
+            padding: 7px 16px; border-radius: 99px; font-size: 0.82rem; font-weight: 700;
+            background: var(--neon); color: #000; text-decoration: none;
+            box-shadow: var(--glow); transition: all 0.2s;
+        }
+        .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 0 32px rgba(0,255,136,0.4); }
+
+        /* ── HERO ── */
         .hero {
-            padding: 80px 0 60px;
-            text-align: center;
-            background: linear-gradient(180deg, rgba(88,166,255,0.08) 0%, transparent 100%);
+            position: relative; overflow: hidden;
+            padding: 72px 0 56px; text-align: center;
+            background: var(--bg);
         }
-        .hero-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-            font-size: 0.85rem;
-            margin-bottom: 24px;
+        .hero::before {
+            content: ''; position: absolute; inset: 0;
+            background:
+                linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 75%);
+            pointer-events: none;
         }
+        .hero-orb {
+            position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.18; pointer-events: none;
+        }
+        .hero-orb--1 { width: 520px; height: 520px; background: var(--neon); top: -160px; left: 50%; transform: translateX(-60%); }
+        .hero-orb--2 { width: 400px; height: 400px; background: var(--neon2); top: 20px; left: 50%; transform: translateX(30%); opacity: 0.12; }
+        .hero > .container { position: relative; }
+        .hero-live {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 14px; border-radius: 99px;
+            background: rgba(0,255,136,0.07); border: 1px solid rgba(0,255,136,0.2);
+            font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+            letter-spacing: 0.12em; text-transform: uppercase; color: var(--neon);
+            margin-bottom: 22px;
+        }
+        .hero-live-dot {
+            width: 7px; height: 7px; border-radius: 50%; background: var(--neon);
+            box-shadow: 0 0 10px var(--neon); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.9); } }
         .hero h1 {
-            font-size: 3rem;
-            font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 16px;
-            background: linear-gradient(135deg, var(--text-primary), var(--accent));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-family: 'Syne', sans-serif; font-weight: 800;
+            font-size: clamp(2.2rem, 5.5vw, 3.8rem); line-height: 0.95; letter-spacing: -0.04em;
+            margin-bottom: 18px;
+        }
+        .hero h1 span {
+            background: linear-gradient(100deg, var(--neon) 0%, var(--neon2) 55%, var(--neon) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            filter: drop-shadow(0 0 20px rgba(0,255,136,0.25));
         }
         .hero p {
-            font-size: 1.25rem;
-            color: var(--text-secondary);
-            max-width: 700px;
-            margin: 0 auto 32px;
+            font-size: 1.08rem; color: var(--muted); max-width: 640px;
+            margin: 0 auto 32px; line-height: 1.7;
         }
-        .hero-buttons {
-            display: flex;
-            gap: 16px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
+        .hero-buttons { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
         .btn {
-            display: inline-block;
-            padding: 12px 28px;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.2s;
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 13px 26px; border-radius: 99px;
+            font-size: 0.92rem; font-weight: 700; letter-spacing: 0.02em;
+            text-decoration: none; transition: all 0.22s; cursor: pointer;
+            font-family: 'Space Grotesk', sans-serif;
         }
         .btn-primary {
-            background: var(--accent);
-            color: #fff;
+            background: var(--neon); color: #000;
+            box-shadow: 0 0 24px rgba(0,255,136,0.35), 0 4px 16px rgba(0,0,0,0.5);
         }
-        .btn-primary:hover { background: #79c0ff; transform: translateY(-1px); }
+        .btn-primary:hover { background: #1aff9a; transform: translateY(-2px); box-shadow: 0 0 36px rgba(0,255,136,0.5), 0 8px 24px rgba(0,0,0,0.5); }
         .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.06); color: var(--text);
+            border: 1px solid #222; backdrop-filter: blur(8px);
         }
-        .btn-secondary:hover { border-color: var(--accent); }
+        .btn-secondary:hover { border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.06); color: var(--neon); }
+        .btn svg { width: 16px; height: 16px; }
 
-        /* Tech Stack */
         .tech-stack {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            margin-top: 32px;
-            flex-wrap: wrap;
+            display: flex; gap: 8px; justify-content: center; margin-top: 32px; flex-wrap: wrap;
         }
         .tech-badge {
-            padding: 6px 14px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; border-radius: 99px;
+            background: #0a0a0a; border: 1px solid #1a1a1a;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+            letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+            transition: all 0.2s;
         }
+        .tech-badge:hover { border-color: var(--border-neon); color: var(--neon); }
+        .tech-badge i { width: 10px; height: 10px; border-radius: 50%; background: var(--neon); display: inline-block; opacity: 0.9; }
+        .tech-badge:nth-child(2) i { background: var(--neon2); }
+        .tech-badge:nth-child(3) i { background: #ffbd2e; }
+        .tech-badge:nth-child(4) i { background: var(--neon3); }
+        .tech-badge:nth-child(5) i { background: var(--neon); }
+        .tech-badge:nth-child(6) i { background: var(--neon2); }
+        .tech-badge:nth-child(7) i { background: #ff3b6b; }
 
-        /* Features */
-        .features { padding: 80px 0; }
-        .section-title {
-            text-align: center;
-            font-size: 2rem;
+        /* ── SECTION HEADER ── */
+        .section-label {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 600;
+            letter-spacing: 0.16em; text-transform: uppercase; color: var(--neon);
             margin-bottom: 12px;
+        }
+        .section-label::before {
+            content: ''; width: 22px; height: 1px; background: var(--neon); opacity: 0.6;
+        }
+        .section-title {
+            font-family: 'Syne', sans-serif; font-weight: 700;
+            font-size: clamp(1.6rem, 3.5vw, 2.2rem); letter-spacing: -0.03em;
+            line-height: 1.1; margin-bottom: 10px;
         }
         .section-subtitle {
-            text-align: center;
-            color: var(--text-secondary);
-            margin-bottom: 48px;
-            font-size: 1.1rem;
+            color: var(--muted); font-size: 0.98rem; max-width: 600px; margin: 0 auto 44px; text-align: center;
         }
+        .section-head { text-align: center; }
+
+        /* ── FEATURES ── */
+        .features { padding: 88px 0; border-top: 1px solid #0f0f0f; }
         .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 24px;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 16px;
         }
         .feature-card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 32px;
-            transition: border-color 0.2s;
+            position: relative; overflow: hidden;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 16px; padding: 28px;
+            transition: all 0.28s ease;
         }
-        .feature-card:hover { border-color: var(--accent); }
+        .feature-card::before {
+            content: ''; position: absolute; inset: 0; border-radius: 16px; padding: 1px;
+            background: linear-gradient(135deg, transparent, transparent);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.28s;
+        }
+        .feature-card:hover {
+            border-color: rgba(0,255,136,0.28); transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 30px rgba(0,255,136,0.08);
+            background: #0e0e0e;
+        }
+        .feature-card:hover::before {
+            background: linear-gradient(135deg, rgba(0,255,136,0.5), rgba(0,240,255,0.2));
+            opacity: 1;
+        }
         .feature-icon {
-            font-size: 2rem;
-            margin-bottom: 16px;
+            width: 44px; height: 44px; border-radius: 11px;
+            background: rgba(0,255,136,0.07); border: 1px solid rgba(0,255,136,0.14);
+            display: grid; place-items: center; margin-bottom: 18px; color: var(--neon);
         }
-        .feature-card h3 {
-            font-size: 1.2rem;
-            margin-bottom: 8px;
-        }
-        .feature-card p {
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-        }
+        .feature-icon svg { width: 20px; height: 20px; }
+        .feature-card h3 { font-size: 1rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; }
+        .feature-card p { color: var(--muted); font-size: 0.88rem; line-height: 1.7; }
 
-        /* Architecture */
-        .architecture {
-            padding: 80px 0;
-            background: var(--bg-secondary);
+        /* ── ARCHITECTURE ── */
+        .architecture { padding: 88px 0; background: var(--bg2); border-top: 1px solid #0f0f0f; border-bottom: 1px solid #0f0f0f; }
+        .arch-window {
+            background: #050505; border: 1px solid var(--border);
+            border-radius: 14px; overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,255,136,0.06);
         }
+        .arch-window-bar {
+            display: flex; align-items: center; gap: 8px;
+            padding: 12px 16px; background: #0a0a0a; border-bottom: 1px solid #151515;
+        }
+        .arch-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .arch-dot--r { background: #ff5f56; } .arch-dot--y { background: #ffbd2e; } .arch-dot--g { background: #27c93f; box-shadow: 0 0 8px rgba(39,201,63,0.5); }
+        .arch-window-title {
+            margin-left: 10px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase;
+        }
+        .arch-window-title span { color: var(--neon); }
         .arch-diagram {
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 40px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            overflow-x: auto;
-            line-height: 1.8;
-            color: var(--accent);
+            padding: 28px 20px; overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.75;
+            color: var(--neon); text-shadow: 0 0 10px rgba(0,255,136,0.25);
+            scrollbar-width: thin;
         }
+        .arch-diagram pre { margin: 0; }
+        .arch-modes {
+            display: flex; justify-content: center; gap: 48px; padding: 14px;
+            background: #080808; border-top: 1px solid #151515;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 600;
+            letter-spacing: 0.14em; text-transform: uppercase;
+        }
+        .arch-modes span:first-child { color: var(--neon); }
+        .arch-modes span:last-child { color: var(--neon2); }
 
-        /* EA Variants */
-        .ea-section { padding: 80px 0; }
-        .ea-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
+        /* ── EA VARIANTS ── */
+        .ea-section { padding: 88px 0; }
+        .ea-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
         .ea-card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 24px;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 24px; position: relative; overflow: hidden;
+            transition: all 0.28s ease;
         }
-        .ea-card h4 {
-            color: var(--accent);
-            margin-bottom: 8px;
+        .ea-card::after {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(0,255,136,0.3), transparent);
+            opacity: 0; transition: opacity 0.28s;
         }
-        .ea-card .ea-desc {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
+        .ea-card:hover { border-color: rgba(0,255,136,0.22); transform: translateY(-2px); box-shadow: 0 10px 32px rgba(0,0,0,0.5), var(--glow2); }
+        .ea-card:hover::after { opacity: 1; }
+        .ea-card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .ea-icon {
+            width: 36px; height: 36px; border-radius: 9px;
+            background: #0f0f0f; border: 1px solid #1e1e1e;
+            display: grid; place-items: center; color: var(--muted); flex-shrink: 0;
         }
-        .ea-card .ea-tags {
-            margin-top: 12px;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
+        .ea-card:hover .ea-icon { border-color: rgba(0,255,136,0.25); color: var(--neon); background: rgba(0,255,136,0.06); }
+        .ea-icon svg { width: 16px; height: 16px; }
+        .ea-card h4 { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; }
+        .ea-card .ea-desc { color: var(--muted); font-size: 0.86rem; line-height: 1.6; margin-bottom: 14px; }
+        .ea-tags { display: flex; gap: 6px; flex-wrap: wrap; }
         .ea-tag {
-            padding: 2px 8px;
-            background: var(--bg-primary);
-            border-radius: 4px;
-            font-size: 0.8rem;
-            color: var(--accent-green);
+            padding: 3px 9px; border-radius: 99px;
+            background: #111; border: 1px solid #1e1e1e;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 600;
+            letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
         }
+        .ea-card:hover .ea-tag { border-color: rgba(0,255,136,0.15); color: #aaa; }
 
-        /* Quick Start */
-        .quickstart {
-            padding: 80px 0;
-            background: var(--bg-secondary);
-        }
+        /* ── QUICK START ── */
+        .quickstart { padding: 88px 0; background: var(--bg2); border-top: 1px solid #0f0f0f; border-bottom: 1px solid #0f0f0f; }
         .steps {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            max-width: 900px;
-            margin: 0 auto;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;
+            max-width: 960px; margin: 0 auto; position: relative;
         }
         .step {
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 24px;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 26px; position: relative;
+            transition: all 0.25s;
         }
+        .step:hover { border-color: rgba(0,255,136,0.2); box-shadow: var(--glow2); }
         .step-num {
-            display: inline-block;
-            width: 32px;
-            height: 32px;
-            background: var(--accent);
-            color: #fff;
-            text-align: center;
-            line-height: 32px;
-            border-radius: 50%;
-            font-weight: bold;
-            margin-bottom: 12px;
+            display: inline-grid; place-items: center;
+            width: 32px; height: 32px; border-radius: 50%;
+            background: var(--neon); color: #000;
+            font-family: 'Syne', sans-serif; font-weight: 800; font-size: 0.85rem;
+            box-shadow: var(--glow); margin-bottom: 14px;
         }
-        .step h4 { margin-bottom: 8px; }
-        .step p { color: var(--text-secondary); font-size: 0.9rem; }
+        .step h4 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+        .step p { color: var(--muted); font-size: 0.86rem; line-height: 1.65; }
+        .step code {
+            font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;
+            background: #111; border: 1px solid #1e1e1e; padding: 1px 6px; border-radius: 4px; color: var(--neon);
+        }
 
-        /* FAQ */
-        .faq-section { padding: 80px 0; }
-        .faq-list { max-width: 800px; margin: 0 auto; }
+        /* ── FAQ ── */
+        .faq-section { padding: 88px 0; }
+        .faq-list { max-width: 760px; margin: 0 auto; }
         details.faq-item {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            margin-bottom: 12px;
-            overflow: hidden;
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 12px; margin-bottom: 10px; overflow: hidden;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
-        details.faq-item[open] { border-color: var(--accent); }
+        details.faq-item[open] { border-color: rgba(0,255,136,0.25); box-shadow: 0 0 20px rgba(0,255,136,0.06); }
         details.faq-item summary {
-            padding: 18px 24px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 1rem;
-            list-style: none;
-            position: relative;
+            padding: 18px 20px; padding-right: 44px;
+            cursor: pointer; font-weight: 600; font-size: 0.93rem;
+            list-style: none; position: relative; user-select: none;
         }
         details.faq-item summary::-webkit-details-marker { display: none; }
         details.faq-item summary::after {
-            content: '+';
-            position: absolute;
-            right: 24px;
-            color: var(--accent);
-            font-size: 1.3rem;
-            transition: transform 0.2s;
+            content: ''; position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+            width: 28px; height: 28px; border-radius: 50%;
+            background: #111; border: 1px solid #1e1e1e;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 2.5V9.5M2.5 6H9.5' stroke='%23888' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: center;
+            transition: all 0.2s;
         }
-        details.faq-item[open] summary::after { transform: rotate(45deg); }
+        details.faq-item[open] summary::after {
+            background-color: var(--neon); border-color: var(--neon);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.5 6H9.5' stroke='black' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+            transform: translateY(-50%) rotate(180deg);
+        }
         details.faq-item .faq-answer {
-            padding: 0 24px 18px;
-            color: var(--text-secondary);
-            font-size: 0.95rem;
+            padding: 0 20px 18px; color: var(--muted); font-size: 0.88rem; line-height: 1.7;
+        }
+        details.faq-item .faq-answer code {
+            font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;
+            background: #111; border: 1px solid #1e1e1e; padding: 1px 6px; border-radius: 4px; color: var(--neon);
         }
 
-        /* Stats */
-        .stats {
-            padding: 60px 0;
-            text-align: center;
-        }
-        .stats-grid {
-            display: flex;
-            justify-content: center;
-            gap: 48px;
-            flex-wrap: wrap;
-        }
+        /* ── STATS ── */
+        .stats { padding: 48px 0; border-top: 1px solid #0f0f0f; border-bottom: 1px solid #0f0f0f; background: var(--bg2); }
+        .stats-grid { display: flex; justify-content: center; gap: 48px; flex-wrap: wrap; }
+        .stat { text-align: center; }
         .stat h3 {
-            font-size: 2.5rem;
-            color: var(--accent);
+            font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2.6rem; letter-spacing: -0.04em;
+            background: linear-gradient(180deg, var(--neon), var(--neon2));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            filter: drop-shadow(0 0 14px rgba(0,255,136,0.3));
+            line-height: 1;
         }
         .stat p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
+            margin-top: 6px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
         }
 
-        /* CTA */
-        .cta {
-            padding: 80px 0;
-            text-align: center;
+        /* ── CTA ── */
+        .cta { padding: 88px 0; text-align: center; position: relative; overflow: hidden; }
+        .cta::before {
+            content: ''; position: absolute; inset: 0;
+            background: radial-gradient(ellipse 60% 80% at 50% 100%, rgba(0,255,136,0.08), transparent 70%);
+            pointer-events: none;
         }
-        .cta h2 { margin-bottom: 16px; }
-        .cta p {
-            color: var(--text-secondary);
-            margin-bottom: 32px;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-        }
+        .cta > .container { position: relative; }
+        .cta h2 { font-family: 'Syne', sans-serif; font-weight: 800; font-size: clamp(1.6rem, 4vw, 2.4rem); letter-spacing: -0.03em; margin-bottom: 12px; }
+        .cta h2 span { color: var(--neon); }
+        .cta p { color: var(--muted); max-width: 560px; margin: 0 auto 28px; font-size: 0.95rem; line-height: 1.7; }
 
-        /* Footer */
+        /* ── DONATE ── */
+        .donate { padding: 56px 0 72px; text-align: center; }
+        .donate-card {
+            background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+            padding: 28px; max-width: 520px; margin: 0 auto;
+            position: relative; overflow: hidden;
+        }
+        .donate-card::before {
+            content: ''; position: absolute; inset: 0; border-radius: 14px; padding: 1px;
+            background: linear-gradient(135deg, rgba(0,255,136,0.3), rgba(0,240,255,0.15), rgba(181,107,255,0.2));
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0.5;
+        }
+        .donate-label {
+            font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700;
+            letter-spacing: 0.14em; text-transform: uppercase; color: var(--neon); margin-bottom: 10px;
+        }
+        .donate-addr {
+            display: inline-block; background: #000; border: 1px solid #1a1a1a; border-radius: 8px;
+            padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;
+            color: var(--text); word-break: break-all; letter-spacing: 0.02em;
+        }
+        .donate-hint { color: var(--dim); font-size: 0.78rem; margin-top: 10px; }
+
+        /* ── FOOTER ── */
         footer {
-            padding: 40px 0;
-            border-top: 1px solid var(--border);
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.85rem;
+            padding: 28px 0; border-top: 1px solid #111;
+            text-align: center; color: var(--dim); font-size: 0.8rem;
         }
-        footer a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-        footer a:hover { text-decoration: underline; }
+        footer a { color: var(--muted); text-decoration: none; transition: color 0.2s; }
+        footer a:hover { color: var(--neon); }
+        .footer-links { display: flex; gap: 16px; justify-content: center; margin-bottom: 8px; }
+        .footer-links a { font-weight: 500; }
 
-        /* Responsive */
+        /* ── REVEAL ── */
+        .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.65s ease, transform 0.65s ease; }
+        .reveal.in { opacity: 1; transform: translateY(0); }
+
+        /* ── RESPONSIVE ── */
         @media (max-width: 768px) {
-            .hero h1 { font-size: 2rem; }
-            .hero p { font-size: 1rem; }
-            .arch-diagram { padding: 20px; font-size: 0.75rem; }
+            .nav-links { display: none; }
+            .hero { padding: 48px 0 40px; }
+            .arch-diagram { font-size: 0.62rem; padding: 18px 12px; }
+            .arch-modes { gap: 20px; font-size: 0.62rem; }
+            .stats-grid { gap: 28px; }
+            .stat h3 { font-size: 2rem; }
         }
     </style>
 
@@ -489,76 +605,119 @@
 </head>
 <body>
 
-<!-- Hero -->
+<!-- NAV -->
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="#" class="nav-logo"><span class="nav-logo-mark">D</span> DAX V2</a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#architecture">Architecture</a>
+            <a href="#ea">EAs</a>
+            <a href="#faq">FAQ</a>
+        </div>
+        <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="nav-cta">GitHub &rarr;</a>
+    </div>
+</nav>
+
+<!-- HERO -->
 <section class="hero">
+    <div class="hero-orb hero-orb--1"></div>
+    <div class="hero-orb hero-orb--2"></div>
     <div class="container">
-        <span class="hero-badge">Open Source - MIT License</span>
-        <h1>DAX AI Agent Grid Scalper</h1>
-        <p>AI-powered MetaTrader 5 Expert Advisor with DeepSeek LLM market analysis, real-time news filtering, and a Python FastAPI backend for automated forex grid trading.</p>
+        <div class="hero-live"><span class="hero-live-dot"></span> Systems Online &mdash; MIT Licensed &mdash; v2.0</div>
+        <h1>DAX AI Agent<br><span>Grid Scalper</span></h1>
+        <p>AI-powered MetaTrader 5 Expert Advisor with <strong style="color:var(--text);font-weight:600">DeepSeek LLM</strong> market analysis, real-time news filtering, and a Python FastAPI backend for automated forex grid trading.</p>
         <div class="hero-buttons">
-            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">View on GitHub</a>
-            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper#quick-start" class="btn btn-secondary">Quick Start Guide</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.48v-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.2-1.12-1.52-1.12-1.52-.92-.64.07-.63.07-.63 1.02.07 1.55 1.07 1.55 1.07.9 1.58 2.36 1.12 2.94.86.09-.67.35-1.12.64-1.38-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.27 2.75 1.05A9.3 9.3 0 0 1 12 7.43a9.3 9.3 0 0 1 2.5.34c1.91-1.32 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.95.68 1.91v2.84c0 .26.18.58.69.48A10.22 10.22 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z"/></svg>
+                View on GitHub
+            </a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper#quick-start" class="btn btn-secondary">
+                Quick Start
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </a>
         </div>
         <div class="tech-stack">
-            <span class="tech-badge">MetaTrader 5</span>
-            <span class="tech-badge">MQL5</span>
-            <span class="tech-badge">Python 3.11</span>
-            <span class="tech-badge">FastAPI</span>
-            <span class="tech-badge">DeepSeek AI</span>
-            <span class="tech-badge">Docker</span>
-            <span class="tech-badge">NewsAPI</span>
+            <span class="tech-badge"><i></i> MetaTrader 5</span>
+            <span class="tech-badge"><i></i> MQL5</span>
+            <span class="tech-badge"><i></i> Python 3.11</span>
+            <span class="tech-badge"><i></i> FastAPI</span>
+            <span class="tech-badge"><i></i> DeepSeek AI</span>
+            <span class="tech-badge"><i></i> Docker</span>
+            <span class="tech-badge"><i></i> NewsAPI</span>
         </div>
     </div>
 </section>
 
-<!-- Features -->
-<section class="features">
+<!-- FEATURES -->
+<section class="features" id="features">
     <div class="container">
-        <h2 class="section-title">Intelligent Algorithmic Trading</h2>
-        <p class="section-subtitle">Combining grid trading with AI-powered market analysis and real-time news intelligence</p>
+        <div class="section-head reveal">
+            <div class="section-label">Capabilities</div>
+            <h2 class="section-title">Intelligent Algorithmic Trading</h2>
+            <p class="section-subtitle">Grid trading supercharged with LLM reasoning and real-time news intelligence</p>
+        </div>
         <div class="features-grid">
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f9e0;</div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2"/><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+                </div>
                 <h3>DeepSeek AI Analysis</h3>
-                <p>LLM-powered market analysis generates professional-grade insights, risk scores, and BUY/SELL/HOLD signals with confidence levels.</p>
+                <p>LLM-powered market analysis generates professional insights, risk scores, and BUY / SELL / HOLD signals with confidence levels.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f4c8;</div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                </div>
                 <h3>Dynamic Grid Trading</h3>
-                <p>Breakout-based grid with configurable distance, Fibonacci spacing, and AI-optimized order placement for consistent scalping profits.</p>
+                <p>Breakout-based grid with configurable distance, Fibonacci spacing, and AI-optimized order placement for consistent scalping.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f4f0;</div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><path d="M14 2v6h6"/><path d="M8 14h8"/><path d="M8 18h5"/><path d="M8 10h2"/></svg>
+                </div>
                 <h3>News Intelligence</h3>
-                <p>Real-time forex news from 100,000+ sources with sentiment scoring. Automatic caution mode 30 minutes before high-impact events.</p>
+                <p>Real-time forex news from 100,000+ sources with sentiment scoring. Caution mode 30 min before high-impact events.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f6e1;</div>
-                <h3>Circuit Breaker Risk Mgmt</h3>
-                <p>Daily loss limits, drawdown protection, and AI-adjusted position sizing. Trades stop automatically when risk thresholds are breached.</p>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+                </div>
+                <h3>Circuit Breaker Risk</h3>
+                <p>Daily loss limits, drawdown protection, and AI-adjusted position sizing. Trading halts automatically when risk thresholds breach.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x26a1;</div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/></svg>
+                </div>
                 <h3>FastAPI Backend</h3>
-                <p>Python REST API handles AI computation, risk calculations, and news processing. Scalable, Docker-ready, with Swagger documentation.</p>
+                <p>Python REST API handles AI computation, risk math, and news processing. Scalable, Docker-ready, with Swagger docs.</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">&#x1f4ca;</div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                </div>
                 <h3>On-Chart Dashboard</h3>
-                <p>Real-time display of AI status, risk scores, sentiment, technical indicators, and account metrics directly on your MT5 chart.</p>
+                <p>Real-time AI status, risk scores, sentiment, technical indicators, and account metrics directly on your MT5 chart.</p>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Architecture -->
-<section class="architecture">
+<!-- ARCHITECTURE -->
+<section class="architecture" id="architecture">
     <div class="container">
-        <h2 class="section-title">System Architecture</h2>
-        <p class="section-subtitle">Two deployment modes: Standalone (EA-only) or FastAPI (EA + Python backend)</p>
-        <div class="arch-diagram">
-<pre>
-         METAQUOTTER 5 (Expert Advisor)            PYTHON FASTAPI BACKEND
+        <div class="section-head reveal">
+            <div class="section-label">Under the Hood</div>
+            <h2 class="section-title">System Architecture</h2>
+            <p class="section-subtitle">Two deployment modes: Standalone (EA-only) or FastAPI (EA + Python backend)</p>
+        </div>
+        <div class="arch-window reveal">
+            <div class="arch-window-bar">
+                <span class="arch-dot arch-dot--r"></span><span class="arch-dot arch-dot--y"></span><span class="arch-dot arch-dot--g"></span>
+                <span class="arch-window-title">dax-v2 — <span>architecture</span> — 80×24</span>
+            </div>
+            <div class="arch-diagram"><pre>         METATRADER 5 (Expert Advisor)            PYTHON FASTAPI BACKEND
 
  +--------------------------------+           +----------------------------+
  | DeepSeekNewsGridScalper        |           | FastAPI Application        |
@@ -576,90 +735,73 @@
  +------------+ +----------+                  +------------+ +----------+
  | DeepSeek   | | NewsAPI  |                  | DeepSeek   | | NewsAPI  |
  |   (LLM)    | | (News)   |                  |   (LLM)    | | (News)   |
- +------------+ +----------+                  +------------+ +----------+
-
-        STANDALONE MODE                     FASTAPI MODE
-</pre>
+ +------------+ +----------+                  +------------+ +----------+</pre></div>
+            <div class="arch-modes"><span>● Standalone Mode</span><span>● FastAPI Mode</span></div>
         </div>
     </div>
 </section>
 
-<!-- EA Variants -->
-<section class="ea-section">
+<!-- EA VARIANTS -->
+<section class="ea-section" id="ea">
     <div class="container">
-        <h2 class="section-title">EA Variants</h2>
-        <p class="section-subtitle">Multiple Expert Advisors for different trading strategies and timeframes</p>
+        <div class="section-head reveal">
+            <div class="section-label">Arsenal</div>
+            <h2 class="section-title">EA Variants</h2>
+            <p class="section-subtitle">Five Expert Advisors for different strategies and timeframes</p>
+        </div>
         <div class="ea-grid">
-            <div class="ea-card">
-                <h4>DeepSeekNewsGridScalper V2</h4>
+            <div class="ea-card reveal">
+                <div class="ea-card-top"><span class="ea-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><h4>DeepSeekNewsGridScalper V2</h4></div>
                 <p class="ea-desc">Full-featured standalone EA with AI + News + Grid trading. The flagship system.</p>
-                <div class="ea-tags">
-                    <span class="ea-tag">Grid</span>
-                    <span class="ea-tag">AI</span>
-                    <span class="ea-tag">News</span>
-                    <span class="ea-tag">M1-H4</span>
-                </div>
+                <div class="ea-tags"><span class="ea-tag">Grid</span><span class="ea-tag">AI</span><span class="ea-tag">News</span><span class="ea-tag">M1-H4</span></div>
             </div>
-            <div class="ea-card">
-                <h4>EAFastConnector</h4>
+            <div class="ea-card reveal">
+                <div class="ea-card-top"><span class="ea-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/></svg></span><h4>EAFastConnector</h4></div>
                 <p class="ea-desc">Connects to the Python FastAPI backend for scalable, multi-device deployment.</p>
-                <div class="ea-tags">
-                    <span class="ea-tag">Grid</span>
-                    <span class="ea-tag">FastAPI</span>
-                    <span class="ea-tag">M1-H4</span>
-                </div>
+                <div class="ea-tags"><span class="ea-tag">Grid</span><span class="ea-tag">FastAPI</span><span class="ea-tag">M1-H4</span></div>
             </div>
-            <div class="ea-card">
-                <h4>DAX M5 Standalone</h4>
+            <div class="ea-card reveal">
+                <div class="ea-card-top"><span class="ea-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3v18h18"/><path d="M7 16l4-4 3 3 4-7"/></svg></span><h4>DAX M5 Standalone</h4></div>
                 <p class="ea-desc">M5-optimized grid scalper for high-frequency trading on lower timeframes.</p>
-                <div class="ea-tags">
-                    <span class="ea-tag">Grid</span>
-                    <span class="ea-tag">M5</span>
-                    <span class="ea-tag">Scalping</span>
-                </div>
+                <div class="ea-tags"><span class="ea-tag">Grid</span><span class="ea-tag">M5</span><span class="ea-tag">Scalping</span></div>
             </div>
-            <div class="ea-card">
-                <h4>DAX FibATR Trend</h4>
+            <div class="ea-card reveal">
+                <div class="ea-card-top"><span class="ea-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><h4>DAX FibATR Trend</h4></div>
                 <p class="ea-desc">Fibonacci + ATR trend-following strategy for medium-term positions.</p>
-                <div class="ea-tags">
-                    <span class="ea-tag">Fibonacci</span>
-                    <span class="ea-tag">ATR</span>
-                    <span class="ea-tag">Trend</span>
-                </div>
+                <div class="ea-tags"><span class="ea-tag">Fibonacci</span><span class="ea-tag">ATR</span><span class="ea-tag">Trend</span></div>
             </div>
-            <div class="ea-card">
-                <h4>Fibonation Grid</h4>
+            <div class="ea-card reveal">
+                <div class="ea-card-top"><span class="ea-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v20"/><path d="M8 6c2-1 5-1 7 0"/><path d="M6 10c3-1.5 8-1.5 11 0"/><path d="M5 14c4-1.2 9-1.2 13 0"/><path d="M5 18c4-.8 9-.8 13 0"/></svg></span><h4>Fibonation Grid</h4></div>
                 <p class="ea-desc">Fibonacci-spaced grid for systematic entries in trending markets.</p>
-                <div class="ea-tags">
-                    <span class="ea-tag">Fibonacci</span>
-                    <span class="ea-tag">Grid</span>
-                    <span class="ea-tag">M5</span>
-                </div>
+                <div class="ea-tags"><span class="ea-tag">Fibonacci</span><span class="ea-tag">Grid</span><span class="ea-tag">M5</span></div>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Quick Start -->
+<!-- QUICK START -->
 <section class="quickstart">
     <div class="container">
-        <h2 class="section-title">Quick Start</h2>
-        <p class="section-subtitle">Get trading in 5 minutes with the standalone EA</p>
+        <div class="section-head reveal">
+            <div class="section-label">Get Started</div>
+            <h2 class="section-title">Quick Start</h2>
+            <p class="section-subtitle">Live in 5 minutes with the standalone EA — no backend required</p>
+        </div>
         <div class="steps">
-            <div class="step">
+            <div class="step reveal">
                 <span class="step-num">1</span>
                 <h4>Get API Keys</h4>
-                <p>Sign up for free NewsAPI (100 req/day) and cheap DeepSeek AI (~$5 for months).</p>
+                <p>Free NewsAPI key (100 req/day) + DeepSeek API — about <code>$5</code> lasts months at default 5-min interval.</p>
             </div>
-            <div class="step">
+            <div class="step reveal">
                 <span class="step-num">2</span>
                 <h4>Install EA in MT5</h4>
-                <p>Copy the .mq5 files to your MetaTrader 5 Experts and Include folders, then compile.</p>
+                <p>Copy <code>.mq5</code> to <code>MQL5/Experts</code> and <code>.mqh</code> to <code>MQL5/Include</code>, then compile with <code>F7</code> in MetaEditor.</p>
             </div>
-            <div class="step">
+            <div class="step reveal">
                 <span class="step-num">3</span>
-                <h4>Configure & Trade</h4>
-                <p>Attach to EURUSD chart, enter API keys, enable algo trading, and verify the dashboard.</p>
+                <h4>Configure &amp; Trade</h4>
+                <p>Allow <code>api.newsapi.org</code> + <code>api.deepseek.com</code> in WebRequest, attach to EURUSD, enter keys, enable algo trading.</p>
             </div>
         </div>
     </div>
@@ -668,36 +810,39 @@
 <!-- FAQ -->
 <section class="faq-section" id="faq">
     <div class="container">
-        <h2 class="section-title">Frequently Asked Questions</h2>
-        <p class="section-subtitle">Everything you need to know about the AI grid scalper</p>
-        <div class="faq-list">
+        <div class="section-head reveal">
+            <div class="section-label">Questions</div>
+            <h2 class="section-title">Frequently Asked Questions</h2>
+            <p class="section-subtitle">Everything you need to know</p>
+        </div>
+        <div class="faq-list reveal">
             <details class="faq-item" open>
                 <summary>What is DAX AI Agent Grid Scalper?</summary>
                 <p class="faq-answer">An open-source MetaTrader 5 Expert Advisor that combines breakout grid trading with DeepSeek AI LLM market analysis, real-time NewsAPI news filtering, and automated circuit-breaker risk management, with an optional Python FastAPI backend.</p>
             </details>
             <details class="faq-item">
                 <summary>How does DeepSeek AI improve grid trading?</summary>
-                <p class="faq-answer">DeepSeek AI generates BUY/SELL/HOLD signals with confidence scores, produces a 0-100% risk score from technical, volatility, and news data, dynamically adjusts position sizes and stop losses, and blocks new trades during extreme-risk market conditions.</p>
+                <p class="faq-answer">DeepSeek AI generates BUY/SELL/HOLD signals with confidence scores, produces a 0-100% risk score from technical, volatility, and news data, dynamically adjusts position sizes and stop losses, and blocks new trades during extreme-risk conditions.</p>
             </details>
             <details class="faq-item">
                 <summary>Is it free to use?</summary>
-                <p class="faq-answer">Yes &mdash; MIT licensed. Only optional costs: NewsAPI free tier (100 requests/day) and DeepSeek API credits (~$5 lasts months at default settings).</p>
+                <p class="faq-answer">Yes — MIT licensed. Only optional costs: NewsAPI free tier (100 requests/day) and DeepSeek API credits (~$5 lasts months at default settings).</p>
             </details>
             <details class="faq-item">
                 <summary>What are the system requirements?</summary>
-                <p class="faq-answer">Standalone mode: Windows + MetaTrader 5. FastAPI mode additionally needs Python 3.11+ or Docker. A VPS is recommended for 24/5 operation.</p>
+                <p class="faq-answer">Standalone: Windows + MetaTrader 5. FastAPI mode additionally needs Python 3.11+ or Docker. A VPS is recommended for 24/5 operation.</p>
             </details>
             <details class="faq-item">
                 <summary>Which currency pairs work best?</summary>
-                <p class="faq-answer">Liquid majors: EURUSD, GBPUSD, USDJPY, EURGBP. Avoid exotics like USDTRY/USDZAR due to high spreads.</p>
+                <p class="faq-answer">Liquid majors: EURUSD, GBPUSD, USDJPY, EURGBP. Avoid exotics like USDTRY / USDZAR due to high spreads.</p>
             </details>
             <details class="faq-item">
                 <summary>How does the news filtering work?</summary>
-                <p class="faq-answer">Real-time forex news from NewsAPI with sentiment scoring. 30 minutes before high-impact events, caution mode activates: position sizes cut by 50%, spread filters tightened 20%, only high-confidence trades allowed.</p>
+                <p class="faq-answer">Real-time forex news from NewsAPI with sentiment scoring. 30 minutes before high-impact events, caution mode activates: position sizes cut 50%, spread filters tightened 20%, only high-confidence trades allowed.</p>
             </details>
             <details class="faq-item">
-                <summary>Standalone vs FastAPI mode &mdash; which should I choose?</summary>
-                <p class="faq-answer">Standalone: EA calls AI/news APIs directly from MT5 &mdash; simplest setup, great for single terminals. FastAPI: Python backend centralizes AI/risk logic &mdash; better for scale, customization, multi-terminal deployments.</p>
+                <summary>Standalone vs FastAPI — which should I choose?</summary>
+                <p class="faq-answer">Standalone: EA calls AI/news APIs directly from MT5 — simplest setup, great for one terminal. FastAPI: Python backend centralizes AI/risk logic — better for scale, customization, and multi-terminal deployments.</p>
             </details>
             <details class="faq-item">
                 <summary>Can I use it on a real money account?</summary>
@@ -705,78 +850,71 @@
             </details>
             <details class="faq-item">
                 <summary>How much does the DeepSeek API cost?</summary>
-                <p class="faq-answer">Very little &mdash; about $5 in credits lasts several months at the default 5-minute analysis interval, making DeepSeek one of the cheapest LLM options for algorithmic trading.</p>
+                <p class="faq-answer">Very little — about $5 in credits lasts several months at the default 5-minute interval, making DeepSeek one of the cheapest LLM options for algorithmic trading.</p>
             </details>
             <details class="faq-item">
                 <summary>How do I run the backend with Docker?</summary>
-                <p class="faq-answer"><code>cd Backend && copy .env.example .env</code>, add your API keys to <code>.env</code>, then <code>docker-compose up -d</code>. Point the EA's BackendURL to http://localhost:8000.</p>
+                <p class="faq-answer"><code>cd Backend &amp;&amp; copy .env.example .env</code>, add your API keys to <code>.env</code>, then <code>docker-compose up -d</code>. Point the EA's <code>BackendURL</code> to <code>http://localhost:8000</code>.</p>
             </details>
         </div>
     </div>
 </section>
 
-<!-- Stats -->
+<!-- STATS -->
 <section class="stats">
     <div class="container">
-        <div class="stats-grid">
-            <div class="stat">
-                <h3>5+</h3>
-                <p>EA Variants</p>
-            </div>
-            <div class="stat">
-                <h3>30+</h3>
-                <p>API Endpoints</p>
-            </div>
-            <div class="stat">
-                <h3>6</h3>
-                <p>Risk Controls</p>
-            </div>
-            <div class="stat">
-                <h3>100%</h3>
-                <p>Open Source</p>
-            </div>
+        <div class="stats-grid reveal">
+            <div class="stat"><h3>5+</h3><p>EA Variants</p></div>
+            <div class="stat"><h3>30+</h3><p>API Endpoints</p></div>
+            <div class="stat"><h3>6</h3><p>Risk Controls</p></div>
+            <div class="stat"><h3>100%</h3><p>Open Source</p></div>
         </div>
     </div>
 </section>
 
 <!-- CTA -->
 <section class="cta">
-    <div class="container">
-        <h2>Start Trading Smarter</h2>
+    <div class="container reveal">
+        <h2>Start Trading <span>Smarter</span></h2>
         <p>Free, open-source, and ready to deploy. Combine the power of DeepSeek AI with MetaTrader 5 for intelligent grid trading.</p>
         <div class="hero-buttons">
-            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">Get Started on GitHub</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper" class="btn btn-primary">Get Started on GitHub <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
             <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/QUICKSTART.md" class="btn btn-secondary">Read the Docs</a>
         </div>
     </div>
 </section>
 
-<!-- Donate -->
-<section class="cta" style="background: var(--bg-secondary);">
-    <div class="container">
-        <h2>Support the Project</h2>
-        <p>If you find this useful, consider supporting development with a donation.</p>
-        <div style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; padding: 24px; max-width: 500px; margin: 0 auto; text-align: center;">
-            <p style="color: var(--accent-green); font-weight: 600; margin-bottom: 8px;">USDT (BEP20 / BSC)</p>
-            <code style="background: var(--bg-card); padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; word-break: break-all; display: inline-block;">0xb13d29622961004b54c15452a233a43215331fe2</code>
-            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px;">Send any BEP20 token to this address</p>
+<!-- DONATE -->
+<section class="donate">
+    <div class="container reveal">
+        <div class="donate-card">
+            <div class="donate-label">Support the Project</div>
+            <p style="color:var(--muted);font-size:0.88rem;margin-bottom:14px;">If you find this useful, consider supporting development.</p>
+            <div class="donate-addr">0xb13d29622961004b54c15452a233a43215331fe2</div>
+            <p class="donate-hint">USDT — BEP20 / BSC &nbsp;·&nbsp; Any BEP20 token accepted</p>
         </div>
     </div>
 </section>
 
-<!-- Footer -->
+<!-- FOOTER -->
 <footer>
     <div class="container">
-        <p>
-            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper">GitHub</a> &middot;
-            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/issues">Issues</a> &middot;
+        <div class="footer-links">
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper">GitHub</a>
+            <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/issues">Issues</a>
             <a href="https://github.com/foeed/dax-ai-agent-grid-scalper/blob/main/LICENSE">MIT License</a>
-        </p>
-        <p style="margin-top: 8px;">
-            Trading involves substantial risk. Past performance does not guarantee future results.
-        </p>
+        </div>
+        <p>Trading involves substantial risk. Past performance does not guarantee future results.</p>
     </div>
 </footer>
+
+<script>
+// reveal on scroll
+const io = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); });
+}, { threshold: 0.08 });
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
 
 </body>
 </html>
