@@ -1,234 +1,383 @@
-# DeepSeek AI News Grid Scalper V2
+<div align="center">
 
-## AI-Enhanced Grid Trading System for Standard Accounts
+# DAX AI Agent Grid Scalper
 
-A sophisticated Expert Advisor that combines grid trading with DeepSeek AI analysis and real-time news filtering for enhanced risk management.
+### AI-Powered MetaTrader 5 Expert Advisor + Python FastAPI Backend
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![MetaTrader 5](https://img.shields.io/badge/MetaTrader-5-green.svg)](https://www.metatrader5.com/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
+[![GitHub stars](https://img.shields.io/github/stars/dax-ai-agent-grid-scalper?style=social)](https://github.com/dax-ai-agent-grid-scalper)
+[![GitHub issues](https://img.shields.io/github/issues/dax-ai-agent-grid-scalper)](https://github.com/dax-ai-agent-grid-scalper/issues)
+[![Last commit](https://img.shields.io/github/last-commit/dax-ai-agent-grid-scalper)](https://github.com/dax-ai-agent-grid-scalper)
+
+**An intelligent algorithmic trading system that combines grid trading with DeepSeek AI LLM analysis, real-time news filtering, and automated risk management for forex scalping on MetaTrader 5.**
+
+[Quick Start](#-quick-start) | [Architecture](#-architecture) | [EA Variants](#-ea-variants) | [Configuration](#%EF%B8%8F-configuration) | [Backtesting](#-backtesting) | [Contributing](#-contributing)
+
+</div>
 
 ---
 
-## 🚀 Features
+## Features
 
-### Core Trading Engine
-- **Dynamic Grid System**: Breakout-based grid with configurable distance and orders
-- **Smart Position Sizing**: AI-adjusted lot sizes based on risk score
-- **Adaptive Stop Loss**: ATR-based dynamic stops with AI optimization
-- **Trailing & Break-Even**: Automated profit protection
+### AI-Powered Trading Engine
 
-### AI Integration
-- **DeepSeek AI Analysis**: Professional-grade market analysis
-- **Sentiment Analysis**: News sentiment scoring
-- **Risk Assessment**: Real-time risk score (0-100%)
-- **Signal Generation**: BUY/SELL/HOLD recommendations
-- **Confidence Levels**: AI certainty measurement
+| Feature | Description |
+|---------|-------------|
+| **DeepSeek AI Integration** | LLM-powered market analysis with professional-grade insights |
+| **Sentiment Analysis** | Real-time news sentiment scoring for currency pairs |
+| **Signal Generation** | AI-driven BUY/SELL/HOLD recommendations with confidence levels |
+| **Risk Scoring** | 0-100% dynamic risk assessment based on technical + fundamental data |
 
-### News Intelligence
-- **Free NewsAPI Integration**: Real-time forex news
-- **Economic Calendar**: High-impact event detection
-- **News Caution Mode**: Automatic risk reduction before news
-- **Sentiment Scoring**: Market sentiment from news analysis
+### Advanced Grid Trading
+
+| Feature | Description |
+|---------|-------------|
+| **Breakout Grid System** | Dynamic grid placement based on price action |
+| **Smart Position Sizing** | AI-adjusted lot sizes based on current risk score |
+| **Adaptive Stop Loss** | ATR-based dynamic stops with AI optimization |
+| **Trailing & Break-Even** | Automated profit protection mechanisms |
+| **Fibonacci Grid** | Fibonacci-based grid spacing for trend-following |
+| **Multiple Timeframes** | M5, M15 support with optimized parameters |
+
+### Real-Time News Intelligence
+
+| Feature | Description |
+|---------|-------------|
+| **NewsAPI Integration** | Live forex news from 100,000+ sources |
+| **Economic Calendar** | High-impact event detection and alerts |
+| **News Caution Mode** | Automatic risk reduction 30min before major news |
+| **Sentiment Scoring** | NLP-based market sentiment from news analysis |
 
 ### Risk Management
-- **Circuit Breakers**: Daily loss and drawdown limits
-- **AI-Adjusted Limits**: Tighter limits during high-risk conditions
-- **Position Size Limits**: Maximum risk per trade enforcement
-- **Spread Protection**: Dynamic spread filtering
+
+| Feature | Description |
+|---------|-------------|
+| **Circuit Breakers** | Daily loss and drawdown limits with auto-close |
+| **AI-Adjusted Limits** | Tighter limits when AI detects elevated risk |
+| **Position Size Enforcement** | Maximum risk per trade strictly enforced |
+| **Spread Protection** | Dynamic spread filtering during volatility |
 
 ---
 
-## 📁 File Structure
+## Architecture
 
 ```
-DAX_V2/
-├── DeepSeekNewsGridScalper_V2.mq5    # Main EA file
+┌──────────────────────────────────────────────────────────────────┐
+│                      DAX AI Trading System                       │
+├─────────────────────────┬────────────────────────────────────────┤
+│    MetaTrader 5 (EA)    │       FastAPI Backend (Python)         │
+│                         │                                        │
+│  ┌───────────────────┐  │  ┌──────────────────────────────────┐  │
+│  │ Grid Trading      │  │  │ DeepSeek AI Service              │  │
+│  │ Order Execution   │  │  │ ├── Market Analysis               │  │
+│  │ Risk Checks       │  │  │ ├── Signal Generation             │  │
+│  │ Dashboard (HTML)  │  │  │ └── Risk Scoring                  │  │
+│  └───────────────────┘  │  └──────────────────────────────────┘  │
+│                         │                                        │
+│  ┌───────────────────┐  │  ┌──────────────────────────────────┐  │
+│  │ MQ5 Modules       │  │  │ News Service                     │  │
+│  │ ├── DeepSeekAI    │  │  │ ├── NewsAPI Integration           │  │
+│  │ └── NewsAPI       │  │  │ ├── Sentiment Analysis            │  │
+│  └───────────────────┘  │  │ └── Economic Calendar             │  │
+│                         │  └──────────────────────────────────┘  │
+│                         │                                        │
+│                         │  ┌──────────────────────────────────┐  │
+│                         │  │ Risk Management                  │  │
+│                         │  │ ├── Circuit Breakers              │  │
+│                         │  │ ├── Position Sizing               │  │
+│                         │  │ └── Dynamic SL/TP                 │  │
+│                         │  └──────────────────────────────────┘  │
+└─────────────────────────┴────────────────────────────────────────┘
+         │ HTTP (REST)                      │
+         └──────────────────────────────────┘
+```
+
+### Standalone vs FastAPI Mode
+
+| Mode | How It Works | Best For |
+|------|-------------|----------|
+| **Standalone** | EA calls DeepSeek + NewsAPI directly via HTTP | Simple setup, single PC |
+| **FastAPI** | EA calls Python backend, backend handles AI | Multi-device, advanced risk, scalability |
+
+---
+
+## Project Structure
+
+```
+dax-ai-agent-grid-scalper/
+├── DeepSeekNewsGridScalper_V2.mq5   # Main standalone EA (800+ lines)
 ├── Include/
-│   ├── NewsAPI.mqh                    # News API integration
-│   └── DeepSeekAI.mqh                 # DeepSeek AI handler
+│   ├── DeepSeekAI.mqh                # AI integration module
+│   └── NewsAPI.mqh                   # News API integration
 ├── Config/
-│   └── EA_Config.ini                  # Configuration file
-├── Files/                             # Log files directory
-└── README.md                          # This file
+│   └── EA_Config.ini                 # EA configuration
+├── Backend/                          # Python FastAPI Backend
+│   ├── app/
+│   │   ├── main.py                   # FastAPI entry point
+│   │   ├── core/                     # Config & database
+│   │   ├── routers/                  # API route handlers
+│   │   ├── services/                 # Business logic
+│   │   └── models/                   # Pydantic schemas
+│   ├── Dockerfile                    # Docker build
+│   ├── docker-compose.yml            # Docker orchestration
+│   ├── requirements.txt              # Python dependencies
+│   └── .env.example                  # Environment template
+├── MQ5_FastAPI/                      # FastAPI-connected EA variants
+│   ├── EAFastConnector.mq5           # Main FastAPI EA
+│   ├── DAX_M5_Standalone.mq5         # M5 standalone
+│   ├── DAX_FibATR_Trend.mq5          # Fibonacci ATR trend
+│   └── Fibonation_Grid.mq5           # Fibonacci grid
+├── docs/
+│   └── index.html                    # Landing page (GitHub Pages)
+└── Scripts/
+    └── TestAPIs.mq5                  # API testing
 ```
 
 ---
 
-## ⚙️ Installation
+## Quick Start
 
-### Step 1: Copy Files
-1. Copy `DeepSeekNewsGridScalper_V2.mq5` to:
-   ```
-   C:\Users\[YourName]\AppData\Roaming\MetaQuotes\Terminal\[TerminalID]\MQL5\Experts\
-   ```
+### Standalone Mode (5 minutes)
 
-2. Copy the `Include` folder to:
-   ```
-   C:\Users\[YourName]\AppData\Roaming\MetaQuotes\Terminal\[TerminalID]\MQL5\Include\
-   ```
+**1. Get API Keys**
 
-### Step 2: Get API Keys
+| API | Cost | Sign Up |
+|-----|------|---------|
+| NewsAPI | **Free** (100 req/day) | [newsapi.org/register](https://newsapi.org/register) |
+| DeepSeek AI | ~$5 for months | [platform.deepseek.com](https://platform.deepseek.com/) |
 
-#### NewsAPI (Free)
-1. Go to https://newsapi.org/register
-2. Create a free account
-3. Copy your API key
-4. Free tier: 100 requests/day
+**2. Install in MetaTrader 5**
 
-#### DeepSeek API
-1. Go to https://platform.deepseek.com/
-2. Create an account
-3. Add credits (minimal cost)
-4. Copy your API key
+```bash
+# Copy files to MT5
+Copy DeepSeekNewsGridScalper_V2.mq5 → MQL5/Experts/
+Copy Include/ → MQL5/Include/
+```
 
-### Step 3: Configure EA
-1. Open MetaEditor
-2. Compile `DeepSeekNewsGridScalper_V2.mq5`
-3. Drag EA onto chart
-4. Enter your API keys in inputs
-5. Enable "Allow WebRequest" in Common tab
+**3. Compile & Configure**
 
-### Step 4: Add NewsAPI Domain
-In MetaTrader:
-1. Go to Tools → Options → Expert Advisors
-2. Add to URL list: `https://api.newsapi.org`
-3. Add to URL list: `https://api.deepseek.com`
+1. Open MetaEditor, press `F7` to compile
+2. Drag EA onto EURUSD chart (H1 or H4)
+3. Enter API keys in EA inputs
+4. Enable "Allow WebRequest" with these URLs:
+   - `https://api.newsapi.org`
+   - `https://api.deepseek.com`
 
----
+**4. Verify**
 
-## 📊 Configuration
+Check Experts tab for `AI Analysis: ENABLED` and the on-chart dashboard.
 
-### AI Settings
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| DeepSeekAPIKey | Your DeepSeek API key | Required |
-| NewsAPIKey | Your NewsAPI key | Required |
-| UseAIAnalysis | Enable AI features | true |
-| UseNewsFilter | Enable news filtering | true |
-| AIAnalysisInterval | Seconds between AI calls | 300 |
+### FastAPI Mode (10 minutes)
 
-### Risk Management
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| MaxRiskPerTrade | Max risk per trade % | 2.0% |
-| MaxDailyLoss | Max daily loss % | 10.0% |
-| MaxDrawdown | Max drawdown % | 15.0% |
-| DynamicPositionSizing | AI-adjusted sizing | true |
-| DynamicStopLoss | AI-adjusted stops | true |
+```bash
+# Clone the repo
+git clone https://github.com/dax-ai-agent-grid-scalper.git
+cd dax-ai-agent-grid-scalper/Backend
 
-### Grid Mechanics
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| GridDistance | Breakout distance (points) | 300 |
-| GridOrders | Max orders per side | 2 |
-| TakeProfit | Take profit (points) | 200 |
-| StopLoss | Stop loss (points) | 150 |
+# Setup environment
+copy .env.example .env
+# Edit .env with your API keys
+
+# Run with Docker (recommended)
+docker-compose up -d
+
+# OR run locally
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+Then configure the EA to point to `http://localhost:8000`.
 
 ---
 
-## 🛡️ Safety Features
+## EA Variants
+
+| EA | Strategy | Timeframe | Mode | Best For |
+|----|----------|-----------|------|----------|
+| **DeepSeekNewsGridScalper_V2** | Grid + AI + News | M1-H4 | Standalone | Full-featured trading |
+| **EAFastConnector** | Grid + Backend | M1-H4 | FastAPI | Scalable setup |
+| **DAX_M5_Standalone** | Grid (M5 optimized) | M5 | Standalone | Scalping |
+| **DAX_FibATR_Trend** | Fibonacci ATR Trend | M5-M30 | Standalone | Trend following |
+| **Fibonation_Grid** | Fibonacci Grid | M5 | Standalone | Grid with Fib spacing |
+
+---
+
+## Configuration
+
+### Risk Profiles
+
+| Profile | Risk/Trade | Daily Loss | Grid Orders | Grid Distance | Suitable For |
+|---------|-----------|------------|-------------|---------------|-------------|
+| **Conservative** | 1.0% | 5.0% | 1 | 400 | Beginners |
+| **Standard** | 2.0% | 10.0% | 2 | 300 | Most traders |
+| **Aggressive** | 3.0% | 15.0% | 3 | 250 | Experienced |
+
+### AI Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `UseAIAnalysis` | `true` | Enable DeepSeek AI analysis |
+| `UseNewsFilter` | `true` | Enable news-based filtering |
+| `AIAnalysisInterval` | `300` | Seconds between AI calls |
+| `MaxRiskPerTrade` | `2.0%` | Maximum risk per trade |
+| `DynamicPositionSizing` | `true` | AI-adjusted lot sizes |
+| `DynamicStopLoss` | `true` | AI-adjusted stop losses |
 
 ### Circuit Breakers
-- **Daily Loss Limit**: Closes all positions at 10% daily loss
-- **Drawdown Limit**: Emergency stop at 15% drawdown
-- **AI-Adjusted Limits**: Tighter limits when AI detects high risk
+
+| Parameter | Default | Action |
+|-----------|---------|--------|
+| `MaxDailyLoss` | `10.0%` | Close all positions |
+| `MaxDrawdown` | `15.0%` | Emergency stop trading |
+| `AIAdjustedLimits` | `true` | Tighter limits when AI risk > 70% |
+
+---
+
+## Risk Management
+
+### AI Risk Scoring
+
+```
+Risk Score = Technical (30%) + Volatility (30%) + News (20%) + AI Confidence (20%)
+
+0-30%  → Low Risk    → Full position sizes
+30-60% → Medium Risk → Reduced position sizes
+60-80% → High Risk   → Minimal trading
+80-100% → Extreme     → No new trades
+```
 
 ### News Protection
-- **Pre-News Caution**: Reduces activity 30 min before high-impact news
-- **Position Size Reduction**: Cuts lot size by 50% during news
-- **Spread Filtering**: Tighter spread limits during volatility
 
-### AI Risk Controls
-- **Risk Score**: 0-100% risk assessment
-- **Confidence Filter**: Only trades when AI is confident
-- **Signal Filtering**: Prevents trading against strong AI signals
+- **30 min before** high-impact news → Caution mode activated
+- **Position sizes** cut by 50%
+- **Spread limits** tightened by 20%
+- **Only high-confidence** trades allowed
 
 ---
 
-## 📈 Dashboard
+## API Reference (FastAPI Mode)
 
-The EA displays real-time information on chart:
+### Trading Endpoints
 
 ```
-========================================
- DEEPSEEK AI GRID SCALPER V2
-========================================
- Engine     : OPERATIONAL
- Balance    : 1000.00 USD
- Equity     : 1005.50 USD
- P/L Today  : +5.50 USD
- Spread     : 12 pts
-----------------------------------------
- AI Status  : Risk: 35% | Conf: 78% | Signal: BUY
- News       : CLEAR | Sentiment: 0.15
-----------------------------------------
- RSI(14)    : 55.3
- ATR(14)    : 0.00850
- EMA20/50   : 1.08500 / 1.08200
-========================================
+POST /api/v1/trading/signal      # Get AI trading signal
+POST /api/v1/trading/analyze     # Full market analysis
+GET  /api/v1/trading/dashboard   # Dashboard data
 ```
 
----
+### Risk Management
 
-## 🔧 Troubleshooting
+```
+POST /api/v1/risk/assess         # Risk assessment
+POST /api/v1/risk/position-size  # Position sizing
+POST /api/v1/risk/dynamic-sl     # Dynamic stop loss
+POST /api/v1/risk/circuit-breakers  # Circuit breaker check
+```
 
-### Common Issues
+### News
 
-1. **"WebRequest not allowed"**
-   - Enable "Allow WebRequest for listed URL" in EA properties
-   - Add API domains to allowed list
+```
+GET /api/v1/news/{symbol}              # Get forex news
+GET /api/v1/news/{symbol}/sentiment    # Sentiment score
+GET /api/v1/news/{symbol}/high-impact  # High impact check
+```
 
-2. **"NewsAPI connection failed"**
-   - Check API key is correct
-   - Verify free tier limits not exceeded
-   - EA will work in offline mode
-
-3. **"DeepSeek API error"**
-   - Verify API key and credits
-   - Check internet connection
-   - EA falls back to built-in analysis
-
-4. **No trades executing**
-   - Check spread is within limits
-   - Verify AI allows new trades
-   - Check for news caution mode
+Full API docs available at `http://localhost:8000/docs` (Swagger UI).
 
 ---
 
-## 📝 Important Notes
+## Backtesting
 
-1. **Demo Test First**: Always test on demo account
-2. **API Costs**: DeepSeek API has minimal costs
-3. **NewsAPI Limits**: Free tier = 100 requests/day
-4. **Risk Warning**: Trading involves risk of capital loss
-5. **VPS Recommended**: For 24/5 operation
+The system has been backtested across multiple strategies and timeframes:
 
----
+| Strategy | Timeframe | Period | Key Metrics |
+|----------|-----------|--------|-------------|
+| Grid Scalper | M5 | 30-90 days | XAUUSD optimization |
+| Fibonacci Grid | M5 | 30 days | Fib spacing analysis |
+| FibATR Trend | M5 | 30 days | ATR-based entries |
 
-## 🔄 Version History
-
-### V2.0 (Current)
-- Added DeepSeek AI integration
-- Added NewsAPI news filtering
-- Enhanced risk management
-- AI-driven position sizing
-- Dynamic stop loss calculation
-- Market regime detection
-
-### V1.0 (Base)
-- Basic grid trading
-- Simple risk controls
-- Standard trailing stops
+> **Disclaimer**: Past performance does not guarantee future results. Always test on demo accounts first.
 
 ---
 
-## 📞 Support
+## Recommended Settings
 
-For issues or questions:
-1. Check README for solutions
-2. Review EA logs in Experts tab
-3. Verify API key configuration
-4. Test on demo account first
+### Best Pairs
+
+| Tier | Pairs |
+|------|-------|
+| **Primary** | EURUSD, GBPUSD, USDJPY |
+| **Secondary** | EURGBP, AUDUSD, USDCAD |
+| **Avoid** | Exotics (USDTRY, USDZAR), minor pairs off-hours |
+
+### Best Sessions
+
+| Session | Time (UTC) | Rating |
+|---------|-----------|--------|
+| London | 07:00-16:00 | Good |
+| New York | 12:00-21:00 | Good |
+| **Overlap** | **12:00-16:00** | **Best** |
+| Asian | 23:00-08:00 | Avoid |
 
 ---
 
-## ⚠️ Disclaimer
+## Roadmap
 
-This EA is for educational purposes. Trading forex carries substantial risk. Past performance is not indicative of future results. Always use proper risk management and never trade with money you cannot afford to lose.
+- [ ] V3: Multi-pair portfolio management
+- [ ] V3: Custom indicator integration
+- [ ] V3: Web dashboard for monitoring
+- [ ] V3: Telegram bot notifications
+- [ ] V3: Backtesting module in FastAPI
+- [ ] V3: Machine learning signal filtering
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## Support the Project
+
+If you find this project useful, consider supporting development:
+
+| Network | Currency | Address |
+|---------|----------|---------|
+| **BSC (BEP20)** | USDT | `0xb13d29622961004b54c15452a233a43215331fe2` |
+
+> You can send any BEP20 token to the address above. Thank you for your support!
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Disclaimer
+
+This Expert Advisor and all associated code is for **educational and research purposes only**. Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors. Past performance is not indicative of future results. Always trade responsibly and never risk money you cannot afford to lose. The authors are not responsible for any financial losses incurred from using this software.
+
+---
+
+<div align="center">
+
+**Built with DeepSeek AI, MetaTrader 5, Python FastAPI, and Docker**
+
+[Star this repo](https://github.com/dax-ai-agent-grid-scalper) | [Report Bug](https://github.com/dax-ai-agent-grid-scalper/issues) | [Request Feature](https://github.com/dax-ai-agent-grid-scalper/issues)
+
+</div>

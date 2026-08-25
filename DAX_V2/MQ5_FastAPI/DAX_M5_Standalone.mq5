@@ -85,11 +85,11 @@ int OnInit()
    m_sell_orders = 0;
 
    // Minimum balance check: gold needs ~$106 margin for 2x 0.01 lot orders
-   if(m_start_balance < 200)
+   if(m_start_balance < 100)
    {
       m_halted = true;
       Print("!!! BALANCE TOO LOW: $", DoubleToString(m_start_balance,2),
-            " - need minimum $200 for XAUUSD 0.01 lot. EA halted.");
+            " - need minimum $100 for XAUUSD 0.01 lot. EA halted.");
    }
    else
    {
@@ -104,7 +104,7 @@ int OnInit()
    Print("DAX M5 Standalone v1.01 | Balance: $", DoubleToString(m_start_balance,2),
          " | Magic: ", InpMagicNumber,
          " | TF: ", EnumToString(Period()),
-         " | Min Bal: $200");
+         " | Min Bal: $100");
    return(INIT_SUCCEEDED);
 }
 
@@ -125,7 +125,7 @@ void OnTick()
     {
        m_day = dt.day_of_year;
        m_start_balance = m_account.Balance();
-       if(m_account.Balance() >= 200)
+       if(m_account.Balance() >= 100)
           m_halted = false;   // resume trading on new day
     }
 
@@ -149,20 +149,23 @@ void OnTick()
        }
     }
 
-   // Recalculate signal periodically
-   if((int)(TimeCurrent() - m_last_signal) >= InpUpdateSec)
-   {
-      CalcSignal();
-      m_last_signal = TimeCurrent();
-   }
+    // Check for new bar: sync processing with Python's bar-level model
+    static datetime s_last_bar = 0;
+    datetime cur_bar = iTime(_Symbol, Period(), 0);
+    bool new_bar = (cur_bar != s_last_bar);
+    if(new_bar)
+    {
+       s_last_bar = cur_bar;
+       CalcSignal();
+    }
 
-   // Manage grid
-   ManageGrid();
+    // Manage grid: cancel always, build only on new bar
+    ManageGrid(new_bar);
 
-   // Trail positions
-   TrailPositions();
+    // Trail positions: every tick (continuous protection)
+    TrailPositions();
 
-   // Dashboard
+    // Dashboard
    double pnl = eq - m_start_balance;
    double pnl_pct = m_start_balance > 0 ? (pnl / m_start_balance) * 100 : 0;
    Comment(
@@ -271,7 +274,7 @@ void CalcSignal()
 //+------------------------------------------------------------------+
 //| GRID MANAGEMENT                                                   |
 //+------------------------------------------------------------------+
-void ManageGrid()
+void ManageGrid(bool allow_build)
 {
    int live = CountPositions();
    int pend = CountOrders();
@@ -297,12 +300,12 @@ void ManageGrid()
    }
 
    // Only build when no positions AND no pending (matches Python exactly)
-   if(live == 0 && pend == 0 && m_signal != "HOLD"
+   if(allow_build && live == 0 && pend == 0 && m_signal != "HOLD"
       && (m_buy_orders > 0 || m_sell_orders > 0))
    {
-      // Time-based cooldown: 30 minutes minimum between grid rebuilds
+      // Time-based cooldown: 50 minutes minimum between grid rebuilds
       static datetime s_last_grid_time = 0;
-      if((int)(TimeCurrent() - s_last_grid_time) < 1800) return;
+      if((int)(TimeCurrent() - s_last_grid_time) < 3000) return;
       s_last_grid_time = TimeCurrent();
       BuildGrid();
    }
